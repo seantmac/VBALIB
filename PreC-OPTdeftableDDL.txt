@@ -1,0 +1,264 @@
+USE [BMOS] 
+GO 
+
+--  Object:  Table [dbo].[tMTXtblDefCoeff] Script Date: 2021-07-27 
+--        :  Generated From C:\OPTMODELS\PC31\PC31APP.MDB 
+--           FIND THE CODE IN THE DDLer FUNCTION AND DDLall 
+
+DROP TABLE IF EXISTS [dbo].[tMTXtblDefCoeff]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tMTXtblDefCoeff] (
+  [CoeffTypeID] INT IDENTITY(1,1), 
+  [CoeffActive] BIT NOT NULL, 
+  [CoeffType] NVARCHAR(56) NOT NULL, 
+  [ColType] NVARCHAR(18) NOT NULL, 
+  [RowType] NVARCHAR(18) NOT NULL, 
+  [CoeffRecSet] NVARCHAR(55) NOT NULL, 
+  [CoeffField] NVARCHAR(44) NOT NULL, 
+  [UseAlternateQry] BIT NOT NULL, 
+  [AlternateQryText] NVARCHAR(255) NULL, 
+  INDEX IDX_ColType            NONCLUSTERED (ColType ) , 
+  INDEX IDX_ColType1           NONCLUSTERED (CoeffType ) , 
+  INDEX IDX_ColTypeID          NONCLUSTERED (CoeffTypeID ) , 
+  CONSTRAINT PK_tMTXtblDefCoeff   PRIMARY KEY NONCLUSTERED (CoeffTypeID ) , 
+  INDEX IDX_RowType            NONCLUSTERED (RowType )  
+) 
+ON [PRIMARY] 
+GO
+
+
+USE [BMOS] 
+GO 
+
+--  Object:  Table [dbo].[tMTXtblDefCol] Script Date: 2021-07-27 
+--        :  Generated From C:\OPTMODELS\PC31\PC31APP.MDB 
+--           FIND THE CODE IN THE DDLer FUNCTION AND DDLall 
+
+DROP TABLE IF EXISTS [dbo].[tMTXtblDefCol]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tMTXtblDefCol] (
+  [ColTypeID] INT IDENTITY(1,1), 
+  [ColActive] BIT NOT NULL, 
+  [ColType] NVARCHAR(18) NOT NULL, 
+  [ColTypeDesc] NVARCHAR(65) NOT NULL, 
+  [ColTypeTable] NVARCHAR(28) NOT NULL, 
+  [ColTypeRecSet] NVARCHAR(28) NOT NULL, 
+  [ColTypePrefix] NVARCHAR(6) NOT NULL, 
+  [OBJField] NVARCHAR(28) NOT NULL, 
+  [SOSType] NVARCHAR(28) NOT NULL, 
+  [BNDFree] BIT NOT NULL, 
+  [BNDLoField] NVARCHAR(28) NOT NULL, 
+  [BNDUpField] NVARCHAR(28) NOT NULL, 
+  [ClassCount] INT NOT NULL, 
+  [ClassConcat] NVARCHAR(50) NOT NULL, 
+  [C1] NVARCHAR(12) NOT NULL, 
+  [C2] NVARCHAR(12) NOT NULL, 
+  [C3] NVARCHAR(12) NOT NULL, 
+  [C4] NVARCHAR(12) NOT NULL, 
+  [C5] NVARCHAR(12) NOT NULL, 
+  [C6] NVARCHAR(12) NOT NULL, 
+  [C7] NVARCHAR(12) NOT NULL, 
+  [C8] NVARCHAR(12) NOT NULL, 
+  [C9] NVARCHAR(12) NOT NULL, 
+  [C10] NVARCHAR(12) NOT NULL, 
+  [C11] NVARCHAR(12) NOT NULL, 
+  [C12] NVARCHAR(12) NOT NULL, 
+  [C13] NVARCHAR(12) NOT NULL, 
+  [C14] NVARCHAR(12) NOT NULL, 
+  [C15] NVARCHAR(12) NOT NULL, 
+  [C16] NVARCHAR(12) NOT NULL, 
+  INDEX IDX_C1                 NONCLUSTERED (C1 ) , 
+  INDEX IDX_C11                NONCLUSTERED (C2 ) , 
+  INDEX IDX_C12                NONCLUSTERED (C3 ) , 
+  INDEX IDX_C13                NONCLUSTERED (C4 ) , 
+  INDEX IDX_C14                NONCLUSTERED (C5 ) , 
+  INDEX IDX_C15                NONCLUSTERED (C6 ) , 
+  INDEX IDX_C16                NONCLUSTERED (C7 ) , 
+  INDEX IDX_C17                NONCLUSTERED (C8 ) , 
+  INDEX IDX_C18                NONCLUSTERED (C9 ) , 
+  INDEX IDX_C9                 NONCLUSTERED (C16 ) , 
+  INDEX IDX_C91                NONCLUSTERED (C15 ) , 
+  INDEX IDX_C92                NONCLUSTERED (C14 ) , 
+  INDEX IDX_C93                NONCLUSTERED (C13 ) , 
+  INDEX IDX_C94                NONCLUSTERED (C12 ) , 
+  INDEX IDX_C95                NONCLUSTERED (C11 ) , 
+  INDEX IDX_C96                NONCLUSTERED (C10 ) , 
+  CONSTRAINT IDX_UNQ_tMTXtblDefCol   UNIQUE NONCLUSTERED (ColType ) , 
+  INDEX IDX_ColTypeID          NONCLUSTERED (ColTypeID ) , 
+  CONSTRAINT PK_tMTXtblDefCol   PRIMARY KEY NONCLUSTERED (ColTypeID ) , 
+) 
+ON [PRIMARY] 
+GO
+
+
+USE [BMOS] 
+GO 
+
+--  Object:  Table [dbo].[tMTXtblDefDat] Script Date: 2021-07-27 
+--        :  Generated From C:\OPTMODELS\PC31\PC31APP.MDB 
+--           FIND THE CODE IN THE DDLer FUNCTION AND DDLall 
+
+DROP TABLE IF EXISTS [dbo].[tMTXtblDefDat]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tMTXtblDefDat] (
+  [DatTypeID] INT IDENTITY(1,1), 
+  [DatActive] BIT NOT NULL, 
+  [DatMaster] BIT NOT NULL, 
+  [DatType] NVARCHAR(18) NOT NULL, 
+  [DatTypeDesc] NVARCHAR(38) NOT NULL, 
+  [DatTypeTable] NVARCHAR(28) NOT NULL, 
+  [ClassCount] INT NOT NULL, 
+  [ClassConcat] NVARCHAR(50) NOT NULL, 
+  [FieldCount] INT NOT NULL, 
+  [D1] NVARCHAR(12) NOT NULL, 
+  [D2] NVARCHAR(12) NOT NULL, 
+  [D3] NVARCHAR(12) NOT NULL, 
+  [D4] NVARCHAR(12) NOT NULL, 
+  [D5] NVARCHAR(12) NOT NULL, 
+  [D6] NVARCHAR(12) NOT NULL, 
+  [D7] NVARCHAR(12) NOT NULL, 
+  [D8] NVARCHAR(12) NOT NULL, 
+  [D9] NVARCHAR(12) NOT NULL, 
+  [D10] NVARCHAR(12) NOT NULL, 
+  [D11] NVARCHAR(12) NOT NULL, 
+  [D12] NVARCHAR(12) NOT NULL, 
+  [D13] NVARCHAR(12) NOT NULL, 
+  [D14] NVARCHAR(12) NOT NULL, 
+  [D15] NVARCHAR(12) NOT NULL, 
+  [D16] NVARCHAR(12) NOT NULL, 
+  INDEX IDX_C1                 NONCLUSTERED (D1 ) , 
+  INDEX IDX_C11                NONCLUSTERED (D2 ) , 
+  INDEX IDX_C12                NONCLUSTERED (D3 ) , 
+  INDEX IDX_C13                NONCLUSTERED (D4 ) , 
+  INDEX IDX_C14                NONCLUSTERED (D5 ) , 
+  INDEX IDX_C15                NONCLUSTERED (D6 ) , 
+  INDEX IDX_C16                NONCLUSTERED (D7 ) , 
+  INDEX IDX_C17                NONCLUSTERED (D8 ) , 
+  INDEX IDX_C18                NONCLUSTERED (D9 ) , 
+  INDEX IDX_C9                 NONCLUSTERED (D16 ) , 
+  INDEX IDX_C91                NONCLUSTERED (D15 ) , 
+  INDEX IDX_C92                NONCLUSTERED (D14 ) , 
+  INDEX IDX_C93                NONCLUSTERED (D13 ) , 
+  INDEX IDX_C94                NONCLUSTERED (D12 ) , 
+  INDEX IDX_C95                NONCLUSTERED (D11 ) , 
+  INDEX IDX_C96                NONCLUSTERED (D10 ) , 
+  CONSTRAINT IDX_UNQ_tMTXtblDefDat   UNIQUE NONCLUSTERED (DatType ) , 
+  INDEX IDX_ColTypeID          NONCLUSTERED (DatTypeID ) , 
+  CONSTRAINT PK_tMTXtblDefDat   PRIMARY KEY NONCLUSTERED (DatTypeID ) , 
+) 
+ON [PRIMARY] 
+GO
+
+
+USE [BMOS] 
+GO 
+
+--  Object:  Table [dbo].[tMTXtblDefFld] Script Date: 2021-07-27 
+--        :  Generated From C:\OPTMODELS\PC31\PC31APP.MDB 
+--           FIND THE CODE IN THE DDLer FUNCTION AND DDLall 
+
+DROP TABLE IF EXISTS [dbo].[tMTXtblDefFld]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tMTXtblDefFld] (
+  [DatFldID] INT IDENTITY(1,1), 
+  [FldActive] BIT NOT NULL, 
+  [DatType] NVARCHAR(18) NOT NULL, 
+  [FldName] NVARCHAR(38) NOT NULL, 
+  [FldDesc] NVARCHAR(28) NOT NULL, 
+  [FldType] NVARCHAR(50) NOT NULL, 
+  [FldSize] NVARCHAR(50) NOT NULL, 
+  [FldIndex] BIT NOT NULL, 
+  INDEX IDX_ColType            NONCLUSTERED (DatType ) , 
+  INDEX IDX_ColTypeID          NONCLUSTERED (DatFldID ) , 
+  CONSTRAINT PK_tMTXtblDefFld   PRIMARY KEY NONCLUSTERED (DatFldID ) , 
+) 
+ON [PRIMARY] 
+GO
+
+
+USE [BMOS] 
+GO 
+
+--  Object:  Table [dbo].[tMTXtblDefRow] Script Date: 2021-07-27 
+--        :  Generated From C:\OPTMODELS\PC31\PC31APP.MDB 
+--           FIND THE CODE IN THE DDLer FUNCTION AND DDLall 
+
+DROP TABLE IF EXISTS [dbo].[tMTXtblDefRow]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[tMTXtblDefRow] (
+  [RowTypeID] INT IDENTITY(1,1), 
+  [RowActive] BIT NOT NULL, 
+  [RowType] NVARCHAR(18) NOT NULL, 
+  [RowTypeDesc] NVARCHAR(38) NOT NULL, 
+  [RowTypeTable] NVARCHAR(28) NOT NULL, 
+  [RowTypeRecSet] NVARCHAR(28) NOT NULL, 
+  [RowTypePrefix] NVARCHAR(28) NOT NULL, 
+  [RowTypeSNS] NVARCHAR(28) NOT NULL, 
+  [RHSField] NVARCHAR(28) NOT NULL, 
+  [ClassCount] INT NOT NULL, 
+  [ClassConcat] NVARCHAR(50) NOT NULL, 
+  [R1] NVARCHAR(12) NOT NULL, 
+  [R2] NVARCHAR(12) NOT NULL, 
+  [R3] NVARCHAR(12) NOT NULL, 
+  [R4] NVARCHAR(12) NOT NULL, 
+  [R5] NVARCHAR(12) NOT NULL, 
+  [R6] NVARCHAR(12) NOT NULL, 
+  [R7] NVARCHAR(12) NOT NULL, 
+  [R8] NVARCHAR(12) NOT NULL, 
+  [R9] NVARCHAR(12) NOT NULL, 
+  [R10] NVARCHAR(12) NOT NULL, 
+  [R11] NVARCHAR(12) NOT NULL, 
+  [R12] NVARCHAR(12) NOT NULL, 
+  [R13] NVARCHAR(12) NOT NULL, 
+  [R14] NVARCHAR(12) NOT NULL, 
+  [R15] NVARCHAR(12) NOT NULL, 
+  [R16] NVARCHAR(12) NOT NULL, 
+  INDEX IDX_C1                 NONCLUSTERED (R1 ) , 
+  INDEX IDX_C11                NONCLUSTERED (R2 ) , 
+  INDEX IDX_C12                NONCLUSTERED (R3 ) , 
+  INDEX IDX_C13                NONCLUSTERED (R4 ) , 
+  INDEX IDX_C14                NONCLUSTERED (R5 ) , 
+  INDEX IDX_C15                NONCLUSTERED (R6 ) , 
+  INDEX IDX_C16                NONCLUSTERED (R7 ) , 
+  INDEX IDX_C17                NONCLUSTERED (R8 ) , 
+  INDEX IDX_C18                NONCLUSTERED (R9 ) , 
+  CONSTRAINT IDX_UNQ_tMTXtblDefRow   UNIQUE NONCLUSTERED (RowType ) , 
+  INDEX IDX_ColTypeID          NONCLUSTERED (RowTypeID ) , 
+  CONSTRAINT PK_tMTXtblDefRow   PRIMARY KEY NONCLUSTERED (RowTypeID ) , 
+  INDEX IDX_R9                 NONCLUSTERED (R16 ) , 
+  INDEX IDX_R91                NONCLUSTERED (R15 ) , 
+  INDEX IDX_R92                NONCLUSTERED (R14 ) , 
+  INDEX IDX_R93                NONCLUSTERED (R13 ) , 
+  INDEX IDX_R94                NONCLUSTERED (R12 ) , 
+  INDEX IDX_R95                NONCLUSTERED (R11 ) , 
+  INDEX IDX_R96                NONCLUSTERED (R10 )  
+) 
+ON [PRIMARY] 
+GO
+
+
