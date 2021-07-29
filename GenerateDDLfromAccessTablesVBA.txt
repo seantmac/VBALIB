@@ -1,0 +1,90 @@
+Option Compare Database
+Option Explicit
+
+'********** START PRIVATE VARIABLES  **********
+Private mlLastErr       As Long
+Private msLastErr       As String
+Private msErrSource     As String
+Private msErrDesc       As String
+
+
+Sub ExportAllTableCreateDDL()
+
+    Dim lTbl As Long
+    Dim dBase As Database
+    Dim Handle As Integer
+
+    Set dBase = CurrentDb
+
+    Handle = FreeFile
+
+    Open "c:\temp\TableCreateDDL.txt" For Output Access Write As #Handle
+
+    For lTbl = 0 To dBase.TableDefs.count - 1
+         'If the table name is a temporary or system table then ignore it
+        If Left(dBase.TableDefs(lTbl).Name, 1) = "~" Or _
+        Left(dBase.TableDefs(lTbl).Name, 4) = "MSYS" Then
+             '~ indicates a temporary table
+             'MSYS indicates a system level table
+        Else
+          Print #Handle, TableCreateDDL(dBase.TableDefs(lTbl))
+        End If
+    Next lTbl
+    Close Handle
+    Set dBase = Nothing
+End Sub
+
+
+Public Function TableCreateDDL(TableDef As TableDef) As String
+
+         Dim fldDef As Field
+         Dim FieldIndex As Integer
+         Dim fldName As String, fldDataInfo As String
+         Dim DDL As String
+         Dim TableName As String
+
+         TableName = TableDef.Name
+         TableName = Replace(TableName, " ", "_")
+         DDL = "CREATE TABLE " & TableName & "(" & vbCrLf
+         With TableDef
+            For FieldIndex = 0 To .Fields.count - 1
+               Set fldDef = .Fields(FieldIndex)
+               With fldDef
+                  fldName = .Name
+                  fldName = Replace(fldName, " ", "_")
+                  Select Case .Type
+                     Case dbBoolean
+                        fldDataInfo = "NVARCHAR"
+                     Case dbByte
+                        fldDataInfo = "FLOAT"
+                     Case dbInteger
+                        fldDataInfo = "INTEGER"
+                     Case dbLong
+                        fldDataInfo = "INTEGER"
+                     Case dbCurrency
+                        fldDataInfo = "FLOAT"
+                     Case dbSingle
+                        fldDataInfo = "INTEGER"
+                     Case dbDouble
+                        fldDataInfo = "FLOAT"
+                     Case dbDate
+                        fldDataInfo = "DATETIME"
+                     Case dbText
+                        fldDataInfo = "NVARCHAR(" & Format$(.Size) & ")"
+                     Case dbLongBinary
+                        fldDataInfo = "****"
+                     Case dbMemo
+                        fldDataInfo = "****"
+                     Case dbGUID
+                        fldDataInfo = "NVARCHAR(16)"
+                  End Select
+               End With
+               If FieldIndex > 0 Then
+               DDL = DDL & ", " & vbCrLf
+               End If
+               DDL = DDL & "  " & fldName & " " & fldDataInfo
+               Next FieldIndex
+         End With
+         DDL = DDL & ");"
+         TableCreateDDL = DDL
+End Function

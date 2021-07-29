@@ -1,0 +1,29 @@
+
+'THIS CAN BE FOUND IN GCF8MPT.accdb in basApp
+
+Function GetHaversineMiles(lat1Degrees As Double, lon1Degrees As Double, lat2Degrees As Double, lon2Degrees As Double) As Double
+    Dim earthSphereRadiusKilometers As Double
+    Dim kilometerConversionToMilesFactor As Double
+    Dim lat1Radians As Double
+    Dim lon1Radians As Double
+    Dim lat2Radians As Double
+    Dim lon2Radians As Double
+    Dim AsinBase As Double
+    Dim DerivedAsin As Double
+    'Mean radius of the earth (replace with 3443.89849 to get nautical miles)
+    earthSphereRadiusKilometers = 6371
+    'Convert kilometers into miles
+    kilometerConversionToMilesFactor = 0.621371
+    'Convert each decimal degree to radians
+    lat1Radians = (lat1Degrees / 180) * 3.14159265359
+    lon1Radians = (lon1Degrees / 180) * 3.14159265359
+    lat2Radians = (lat2Degrees / 180) * 3.14159265359
+    lon2Radians = (lon2Degrees / 180) * 3.14159265359
+    AsinBase = Sin(Sqr(Sin((lat1Radians - lat2Radians) / 2) ^ 2 + Cos(lat1Radians) * Cos(lat2Radians) * Sin((lon1Radians - lon2Radians) / 2) ^ 2))
+   DerivedAsin = (AsinBase / Sqr(-AsinBase * AsinBase + 1))
+    'Get distance from [lat1,lon1] to [lat2,lon2]
+    'KM:    = Round(2 * DerivedAsin * earthSphereRadiusKilometers, 2)
+    'Miles: = Round(2 * DerivedAsin * (earthSphereRadiusKilometers * kilometerConversionToMilesFactor), 2)
+    GetHaversineMiles = Round(2 * DerivedAsin * (earthSphereRadiusKilometers * kilometerConversionToMilesFactor), 2)
+End Function
+

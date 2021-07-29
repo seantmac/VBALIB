@@ -1,0 +1,346 @@
+Public Function DMedian( _
+ ByVal strField As String, ByVal strDomain As String, _
+ Optional ByVal strCriteria As String) As Variant
+
+    ' Purpose:
+    '     To calculate the median value
+    '     for a field in a table or query.
+    ' In:
+    '     strField: the field.
+    '     strDomain: the table or query.
+    '     strCriteria: an optional WHERE clause to
+    '                  apply to the table or query.
+    ' Out:
+    '     Return value: the median, if successful;
+    '                   Otherwise, an Error value.
+
+	''Applies to:2007 Microsoft Office system, Microsoft Office Access 2007
+	''Adapted from Access Cookbook, 2nd Edition by Ken Getz, Paul Litwin, and Andy Baron. 
+	''  Copyright © 2004, O'Reilly Media, Inc. All rights reserved. Used with permission.
+	''Ken Getz, MCW Technologies, LLC
+	''  April 2009
+	''https://msdn.microsoft.com/en-us/library/dd789431(v=office.12).aspx
+
+    Dim db As DAO.Database
+    Dim rstDomain As DAO.Recordset
+    Dim strSQL As String
+    Dim varMedian As Variant
+    Dim intFieldType As Integer
+    Dim intRecords As Integer
+    
+    Const errAppTypeError = 3169
+    
+    On Error GoTo HandleErr
+
+    Set db = CurrentDb()
+    
+    ' Initialize return value.
+    varMedian = Null
+    
+    ' Build SQL string for recordset.
+    strSQL = "SELECT " & strField & " FROM " & strDomain
+    
+    ' Only use a WHERE clause if one is passed in.
+    If Len(strCriteria) > 0 Then
+        strSQL = strSQL & " WHERE " & strCriteria
+    End If
+    
+    strSQL = strSQL & " ORDER BY " & strField
+    
+    Set rstDomain = db.OpenRecordset(strSQL, dbOpenSnapshot)
+    
+    ' Check the data type of the median field.
+    intFieldType = rstDomain.Fields(strField).Type
+    Select Case intFieldType
+    Case dbByte, dbInteger, dbLong, _
+      dbCurrency, dbSingle, dbDouble, dbDate
+        ' Numeric field.
+        If Not rstDomain.EOF Then
+            rstDomain.MoveLast
+            intRecords = rstDomain.RecordCount
+            ' Start from the first record.
+            rstDomain.MoveFirst
+    
+            If (intRecords Mod 2) = 0 Then
+                ' Even number of records.
+                ' No middle record, so move to the
+                ' record right before the middle.
+                rstDomain.Move ((intRecords \ 2) - 1)
+                varMedian = rstDomain.Fields(strField)
+                ' Now move to the next record, the
+                ' one right after the middle.
+                rstDomain.MoveNext
+                ' And average the two values.
+                varMedian = _
+                  (varMedian + rstDomain.Fields(strField)) / 2
+                ' Make sure you return a date, even when
+                ' averaging two dates.
+                If intFieldType = dbDate And Not IsNull(varMedian) Then
+                    varMedian = CDate(varMedian)
+                End If
+            Else
+                ' Odd number or records.
+                ' Move to the middle record and return its value.
+                rstDomain.Move ((intRecords \ 2))
+                varMedian = rstDomain.Fields(strField)
+            End If
+        Else
+            ' No records; return Null.
+            varMedian = Null
+        End If
+    Case Else
+        ' Non-numeric field; so raise an app error.
+        Err.Raise errAppTypeError
+    End Select
+
+    DMedian = varMedian
+    
+ExitHere:
+    On Error Resume Next
+    rstDomain.Close
+    Set rstDomain = Nothing
+    Exit Function
+
+HandleErr:
+    ' Return an error value.
+    DMedian = CVErr(Err.Number)
+    Resume ExitHere
+End Function
+
+
+
+
+
+Function fMedian(SQLOrTable, GroupFieldName, GroupFieldValue, MedianFieldName)
+	''From: LessThanDot Wiki
+
+	''Fionnuala
+	''82.4k684124
+	''Hi, first off this was very helpful as a starting point, thank you. The UDF has a small error. 
+	''After "rs.Move (rs.RecordCount / 2)" you will need to add the line "rs.movePrevious". This will 
+	''give you the correct Median as Excel would calculate it. – Shawn H Jul 16 '10 at 22:55
+		'''ADDED FIXED AS SUGGESTED BY SHAWN H. -- STM
+
+    Dim rs As DAO.Recordset
+
+    Set db = CurrentDb
+    Set rs1 = db.OpenRecordset(SQLOrTable, dbOpenDynaset)
+
+    If IsDate(GroupFieldValue) Then
+        GroupFieldValue = "#" & GroupFieldValue & "#"
+    ElseIf Not IsNumeric(GroupFieldValue) Then
+        GroupFieldValue = "'" & Replace(GroupFieldValue, "'", "''") & "'"
+    End If
+
+    rs1.Filter = GroupFieldName & "=" & GroupFieldValue
+    rs1.Sort = MedianFieldName
+
+    Set rs = rs1.OpenRecordset()
+    rs.Move (rs.RecordCount / 2)
+    rs.movePrevious   'ADDED FOR FIX SUGGESTED ABOVE
+
+    If rs.RecordCount Mod 2 = 0 Then
+        varMedian1 = rs.Fields(MedianFieldName)
+        rs.MoveNext
+        fMedian = (varMedian1 + rs.Fields(MedianFieldName)) / 2
+    Else
+        fMedian = rs.Fields(MedianFieldName)
+    End If
+
+End Function
+
+
+
+Public Function GetMedian() as variant
+	''Aircode but it should work.
+	''12-18-2010, 01:50 PM	  #5
+	''vbaInet  AWF VIP  Join Date: Jan 2010  Location: U.K.
+	''https://access-programmers.co.uk/forums/showthread.php?t=202859&highlight=median
+
+     dim rs as dao.recordset
+     dim firstVal as Double, recCount as Long
+
+     set rs = currentdb.openrecordset("Select [decPrice] From DatesSplit Order By [decPrice];", dbopensnapshot)
+
+     recCount = rs.recordcount
+
+     if reccount < 2 then
+          select case reccount
+               case 0
+                    getmedian = null
+               case 1
+                    rs.movefirst
+                    getmedian = rs![decPrice]
+          end select
+          set rs = nothing
+          exit function
+     end if
+
+     rs.movelast
+     rs.movefirst
+
+     if (reccount mod 2) = 0 then
+          rs.move (reccount / 2) - 1
+          firstVal = rs![decPrice]
+          rs.movenext
+          getmedian = (firstVal + rs![decPrice]) / 2
+     else
+          rs.move fix(reccount / 2) - 1
+          getmedian = rs![decPrice]
+     end if
+
+     set rs = nothing
+End Function
+
+
+
+
+
+Function Median (tName As String, fldName As String) As Single
+  Dim MedianDB As DAO.Database
+  Dim ssMedian As DAO.Recordset
+  Dim RCount As Integer, i As Integer, x As Double, y As Double, _
+      OffSet As Integer
+  Set MedianDB = CurrentDB()
+  Set ssMedian = MedianDB.Openrecordset("SELECT [" & fldName & _
+            "] FROM [" & tName & "] WHERE [" & fldName & _ 
+            "] IS NOT NULL ORDER BY [" & fldName  & "];")
+  'NOTE: To include nulls when calculating the median value, omit
+  'WHERE [" & fldName & "] IS NOT NULL from the example.
+  ssMedian.MoveLast
+  RCount% = ssMedian.RecordCount
+  x = RCount Mod 2
+  If x <> 0 Then
+     OffSet = ((RCount + 1) / 2) - 2
+     For i% = 0 To OffSet
+        ssMedian.MovePrevious
+     Next i
+     Median = ssMedian(fldName)
+  Else
+     OffSet = (RCount / 2) - 2
+     For i = 0 To OffSet
+        ssMedian.MovePrevious
+     Next i
+     x = ssMedian(fldName)
+     ssMedian.MovePrevious
+     y = ssMedian(fldName)
+     Median = (x + y) / 2
+  End If
+  If Not ssMedian Is Nothing Then
+     ssMedian.Close
+     Set ssMedian = Nothing
+  End If
+  Set MedianDB = Nothing
+End Function
+
+
+
+
+Public Function DMedian( _
+ ByVal strField As String, ByVal strDomain As String, _
+ Optional ByVal strCriteria As String) As Variant
+ 
+    ' Purpose:
+    '     To calculate the median value
+    '     for a field in a table or query.
+    ' In:
+    '     strField: the field
+    '     strDomain: the table or query
+    '     strCriteria: an optional WHERE clause to
+    '                  apply to the table or query
+    ' Out:
+    '     Return value: the median, if successful;
+    '                   Otherwise, an Error value.
+
+
+	''DECENTLY DONE, BUT WITH #ERROR:
+	''However it returns "#Error" in the control.  Any Ideas on what is going wrong?
+	'' The field in question a currency datatype. OR MAYBE IT WAS JUST A FIELDNAME ERROR?
+ 
+    Dim db As DAO.Database
+    Dim rstDomain As DAO.Recordset
+    Dim strSQL As String
+    Dim varMedian As Variant
+    Dim intFieldType As Integer
+    Dim intRecords As Integer
+ 
+    Const errAppTypeError = 3169
+ 
+    On Error GoTo HandleErr
+ 
+    Set db = CurrentDb()
+ 
+    ' Initialize return value
+    varMedian = Null
+ 
+    ' Build SQL string for recordset
+    strSQL = "SELECT " & strField & " FROM " & strDomain
+ 
+    ' Only use a WHERE clause if one is passed in
+    If Len(strCriteria) > 0 Then
+        strSQL = strSQL & " WHERE " & strCriteria
+    End If
+ 
+    strSQL = strSQL & " ORDER BY " & strField
+ 
+    Set rstDomain = db.OpenRecordset(strSQL, dbOpenSnapshot)
+ 
+    ' Check the data type of the median field
+    intFieldType = rstDomain.Fields(strField).Type
+    Select Case intFieldType
+    Case dbByte, dbInteger, dbLong, dbCurrency, dbSingle, dbDouble, dbDate
+        ' Numeric field
+        If Not rstDomain.EOF Then
+            rstDomain.MoveLast
+            intRecords = rstDomain.RecordCount
+            ' Start from the first record
+            rstDomain.MoveFirst
+ 
+            If (intRecords Mod 2) = 0 Then
+                ' Even number of records
+                ' No middle record, so move to the
+                ' record right before the middle
+                rstDomain.Move ((intRecords \ 2) - 1)
+                varMedian = rstDomain.Fields(strField)
+                ' Now move to the next record, the
+                ' one right after the middle
+                rstDomain.MoveNext
+                ' And average the two values
+                varMedian = (varMedian + rstDomain.Fields(strField)) / 2
+                ' Make sure you return a date, even when
+                ' averaging two dates
+                If intFieldType = dbDate And Not IsNull(varMedian) Then
+                    varMedian = CDate(varMedian)
+                End If
+            Else
+                ' Odd number or records
+                ' Move to the middle record and return its value
+                rstDomain.Move ((intRecords \ 2))
+                varMedian = rstDomain.Fields(strField)
+            End If
+        Else
+            ' No records; return Null
+            varMedian = Null
+        End If
+    Case Else
+        ' Non-numeric field; so raise an app error
+        Err.Raise errAppTypeError
+    End Select
+ 
+    DMedian = varMedian
+ 
+ExitHere:
+    On Error Resume Next
+    rstDomain.Close
+    Set rstDomain = Nothing
+    Exit Function
+ 
+HandleErr:
+    ' Return an error value
+    DMedian = CVErr(Err.Number)
+    Resume ExitHere
+End Function
+
+
+
+

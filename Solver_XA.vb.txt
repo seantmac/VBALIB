@@ -1,0 +1,243 @@
+Imports Optimizer
+Namespace COPT
+    <ComClass(Solver_XA.ClassId, Solver_XA.InterfaceId, Solver_XA.EventsId)> _
+    Public Class Solver_XA
+        Inherits Solver
+
+        Structure XAOSL
+            Dim rc As Long '  Return code            - returned
+            Dim XAOSLSize As Long ' Size of this structure - user supplied
+            Dim AuthCode As Long ' Activation code        - Internal usage
+            Dim Reserve1 As Long ' Reserve 1
+            Dim Reserve2 As Long ' Reserve 2
+            Dim CumXATime As Long ' Cum time spent in XA routines
+            Dim LastTime As Long ' Time spent in last function
+            Dim XAComArea As Long ' Pointer to XA communication area - returned
+            Dim allCount As Long ' Number of XA function calls      - returned
+            Dim ProgArea As Long ' Available to programmer          - user area
+            'Dim Reserved(13) As Long ' Reserved for later use
+            Dim Reserved() As Long ' Reserved for later use
+        End Structure
+        Private Const COL_NAME_LEN As Short = 164 ' Number of characters in column names.
+        Private Const ROW_NAME_LEN As Short = 164 ' Number of characters in row name.
+        Private _rc As Optimizer.XA.XAOSL
+#Region "COM GUIDs"
+        ' These  GUIDs provide the COM identity for this class 
+        ' and its COM interfaces. If you change them, existing 
+        ' clients will no longer be able to access the class.
+        Public Const ClassId As String = "9a4630a1-cf1f-4174-83ec-34f5f5408755"
+        Public Const InterfaceId As String = "95cb6a22-12ce-4f72-8a6c-32bc86752999"
+        Public Const EventsId As String = "83fb6760-a225-4ce7-9a69-e26da196c8d0"
+#End Region
+
+        ' A creatable COM class must have a Public Sub New() 
+        ' with no parameters, otherwise, the class will not be 
+        ' registered in the COM registry and cannot be created 
+        ' via CreateObject.
+        Public Sub New()
+            MyBase.New(New COPT.Engine)
+        End Sub
+
+        Public Sub New(ByVal engine As COPT.Engine)
+            MyBase.New(engine)
+        End Sub
+
+        Public Overrides Function Solve(ByRef dtRow As DataTable, ByRef dtCol As DataTable, ByRef dtMtx As DataTable) As Boolean
+            Dim lpProbInfo As typLPprobInfo = MyBase.ProbInfo
+
+            Dim xa As New Optimizer.XA.Optimize(lpProbInfo.intMaxMemory)
+            Dim i As Integer, objFcnValue As Double
+            Dim CName As String, Coef As Double, RName As String, Sense As String
+            Dim sql As String
+            Dim col As String, row As String
+
+            Try
+                xa.setActivationCodes(0, 0)
+                xa.openConnection()
+                xa.setModelSize(lpProbInfo.intRowCt + 1, lpProbInfo.intColCt + 1, lpProbInfo.intCoefCt + lpProbInfo.intColCt + 1, lpProbInfo.intMasterLength + 1, lpProbInfo.intMasterLength + 1)
+                'xa.setModelSize(lpProbInfo.intRowCt, lpProbInfo.intColCt)
+                Debug.Print(lpProbInfo.intRowCt & ", " & lpProbInfo.intColCt & ", " & lpProbInfo.intCoefCt)
+
+                'three lines from Jim B. on 12/19/07
+                'xa.setCommand("Maximize Yes Presolve 0 ")
+                'xa.setCommand("ListInput No Set Debug No ")
+                'xa.setCommand("MpsxSolutionReport Yes Output c:\xa.log")
+
+                'older set
+                'xa.setCommand("Maximize Yes Mute No MpsxSolutionReport Yes Set Debug No Presolve 0 Output c:\xa.log")
+
+                'the MPS generator line from Jim in early '08
+                'xa.setCommand(" FileName  c:\pathInfoStuff\myMpsFileName  ToMps Yes" ) 
+
+                'the mps file options are below near the solve
+                xa.setCommand("Maximize Yes Presolve 0 ")
+                xa.setCommand("ListInput No Set Debug No ")
+                xa.setCommand("MpsxSolutionReport Yes Output c:\xa.log")
+
+
+                'THESE WORK IN MARCH '08
+                'xa.setCommand("Maximize Yes FileName C:\XA\XA.MPS ToMps Yes Presolve 0 ")
+                'xa.setCommand("ListInput No Set Debug No ")
+                'xa.setCommand("MpsxSolutionReport Yes Output c:\xa.log")
+                'xa.setCommand("Set CmprsName _")
+
+
+                'THE ORIGINAL LINES ?aug 2007?  -- don't change them
+                'xa.setCommand("Maximize Yes ToMPS Yes Set FreqLog 0:01")
+                'xa.setCommand("Output c:\\xa.log MatList e ")
+
+
+                '
+                ' Load Column Data ****************************************
+                For i = 0 To dtCol.Rows.Count - 1
+                    CName = dtCol.Rows(i).Item("COL").ToString
+
+                    Coef = dtCol.Rows(i).Item("OBJ")
+                    xa.loadPoint("OBJ", CName, Coef)
+
+                    If dtCol.Rows(i).Item("FREE") Then
+                        xa.setColumnFree(CName)
+                    End If
+
+                    If dtCol.Rows(i).Item("INTGR") Then
+                        xa.setColumnInteger(CName)
+                    End If
+
+                    Coef = dtCol.Rows(i).Item("LO")
+                    xa.loadPoint("MIN", CName, Coef)
+
+                    Coef = dtCol.Rows(i).Item("UP")
+                    xa.loadPoint("MAX", CName, Coef)
+                Next
+
+                '
+                ' Load Row Data *********************************************
+                For i = 0 To dtRow.Rows.Count - 1
+                    RName = dtRow.Rows(i).Item("ROW").ToString
+
+                    Coef = dtRow.Rows(i).Item("RHS")
+                    Sense = dtRow.Rows(i).Item("SENSE").ToString
+                    CName = ""
+
+                    If Sense.Equals("E") Then
+                        xa.setRowFix(RName, Coef)
+                        CName = "FIX"
+                    ElseIf Sense.Equals("G") Then
+                        xa.setRowMin(RName, Coef)
+                        CName = "MIN"
+                    ElseIf Sense.Equals("L") Then
+                        xa.setRowMax(RName, Coef)
+                        CName = "MAX"
+                    Else
+                        'Error
+                    End If
+
+                    xa.loadPoint(RName, CName, Coef)
+                Next
+
+                '
+                ' Load Matrix Data ******************************************
+                For i = 0 To dtMtx.Rows.Count - 1
+                    RName = dtMtx.Rows(i).Item("ROW").ToString
+                    CName = dtMtx.Rows(i).Item("COL").ToString
+                    Coef = dtMtx.Rows(i).Item("COEF")
+
+                    xa.loadPoint(RName, CName, Coef)
+                Next
+
+                xa.setCommand("FileName c:\XA.MPS ToMps Yes") 'Write the problem to an MPS file
+                xa.setCommand("Set CmprsName _")
+
+                xa.solve()
+
+                objFcnValue = xa.getLPObj()
+
+                If xa.getModelStatus() < 3 Then
+                    MsgBox(getSolutionStatusDescription(xa.getModelStatus()) & vbCrLf)
+                Else
+                    MsgBox(getSolutionStatusDescription(xa.getModelStatus()))
+                End If
+
+
+                Debug.Print( _
+                      " Number of Rows: " + Str(xa.getNumberOfRows()) + _
+                      " Number of Columns: " + Str(xa.getNumberOfColumns()) + _
+                      " Optimal Obj: " + Str(xa.getLPObj()))
+
+
+                ' Retrieve based upon index number
+                col = MyBase.Engine.MiscParams.Item("LPM_COLUMN_TABLE_NAME").ToString
+                For i = 0 To xa.getNumberOfColumns() - 1
+                    'Debug.Print( _
+                    '    " Col: " + xa.getColumnName(i) + _
+                    '    " PrimalActivity: " + Str(xa.getColumnPrimalActivity(i)) + _
+                    '    " DualActivity: " + Str(xa.getColumnDualActivity(i)))
+                    'sql = "UPDATE " & col & " SET ACTIVITY = " & xa.getColumnPrimalActivity(i) & ", DJ = " & xa.getColumnDualActivity(i)
+                    'Optimizer.XA.XAACTC()
+                    'Optimizer.XA.XADUALC()
+                    sql = "UPDATE " & col & " SET ACTIVITY = " & xa.getColumnPrimalActivity(i) & ", DJ = " & xa.getColumnDualActivity(i) & " WHERE COL = '" & xa.getColumnName(i) & "'"
+                    MyBase.Engine.CurrentDb.ExecuteNonQuery(sql)
+                Next i
+                'For i = 0 To dtCol.Rows.Count - 1
+                '    'dtCol.Rows(i).Item("")
+                '    '_currentDb.UpdateDataSet(dt, "SELECT * FROM " & _miscParams.Item("LPM_CONSTR_DEF_TABLE_NAME").ToString)
+                '    'dtCol.Rows(i).Item("ACTIVITY") = Optimizer.XA.XAACTC(_rc, dtCol.Rows(i).Item("COL").ToString(), Coef, COL_NAME_LEN)
+                '    'dtCol.Rows(i).Item("ACTIVITY") = 0
+                '    'dtCol.Rows(i).Item("DJ") = 0
+                '    'MyBase.Engine.CurrentDb.UpdateDataSet(dtCol, "SELECT * FROM " & col)
+                '    sql = "UPDATE " & col & " SET ACTIVITY = " & xa.getColumnPrimalActivity(i) & ", DJ = " & xa.getColumnDualActivity(i)
+                '    MyBase.Engine.CurrentDb.ExecuteNonQuery(sql)
+                'Next
+                row = MyBase.Engine.MiscParams.Item("LPM_CONSTR_TABLE_NAME").ToString
+                For i = 0 To xa.getNumberOfRows() - 1
+                    'Debug.Print( _
+                    '" Row: " + xa.getRowName(i) + _
+                    '" PrimalActivity: " + Str(xa.getRowPrimalActivity(i)) + _
+                    '" DualActivity: " + Str(xa.getRowDualActivity(i)))
+                    sql = "UPDATE " & row & " SET ACTIVITY = " & xa.getRowPrimalActivity(i) & ", SHADOW = " & xa.getRowDualActivity(i) & " WHERE ROW = '" & xa.getRowName(i) & "'"
+                    MyBase.Engine.CurrentDb.ExecuteNonQuery(sql)
+                Next i
+                'For i = 0 To dtRow.Rows.Count - 1
+
+                'Next
+
+
+                xa.closeConnection()
+
+            Catch xe As Exception
+                MsgBox(xa.getXAExceptionMessage() & vbNewLine & xe.Message)
+            End Try
+
+        End Function
+
+        Public Overrides Function getSolutionStatusDescription(ByVal sts As Integer) As String
+            Try
+                Dim descrArray(12) As String
+                descrArray(1) = "Optimal Solution"
+                descrArray(2) = "Integer Solution (not proven the optimal integer solution)"
+                descrArray(3) = "Unbounded Solution"
+                descrArray(4) = "Infeasible Solution"
+                descrArray(5) = "Callback function indicates Infeasible Solution"
+                descrArray(6) = "Intermediate Infeasible Solution"
+                descrArray(7) = "Intermediate Non-optimal Solution"
+                descrArray(8) = ""
+                descrArray(9) = "Intermediate Non-integer Solution"
+                descrArray(10) = "Integer Infeasible"
+                descrArray(11) = ""
+                descrArray(12) = "Error Unknown"
+                Return descrArray(sts)
+            Catch ex As Exception
+                Return ""
+            End Try
+        End Function
+
+        Public Overrides Function Solve() As Boolean
+
+        End Function
+
+        Public Overrides Function getSolutionStatusDescription() As String
+            Return Nothing
+        End Function
+
+    End Class
+End Namespace

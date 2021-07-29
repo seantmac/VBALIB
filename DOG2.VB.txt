@@ -1,0 +1,103 @@
+Function Dog2()
+
+Dim il9D As Long
+Dim il10A As Long
+Dim il10A_1 As Long
+Dim il10A_2 As Long
+Dim il10D As Long
+Dim il10D_1 As Long
+Dim il10D_3 As Long
+Dim b As Long
+Dim l As Long
+Dim a As Long
+Dim i As Long
+Dim j As Long
+Dim YR As Long
+Dim mby As Long
+Dim dmy As Long
+Dim own As Long
+
+
+'(11, 21, 31, 41, 51) x (_(1,2,3,4,5)) = _?(2,6)    9D:11 X 10A:72 = 10D:792
+For il9D = 11 To 91 Step 10
+   For il10A_1 = 1 To 9  'orig used 1 to 9
+      For il10A_2 = 1 To 5
+         il10A = CLng(CStr(il10A_1) & CStr(il10A_2))
+         il10D = il9D * il10A
+         il10D_1 = Left(CStr(il10D), 1)
+         il10D_3 = Right(CStr(il10D), 1)
+         If (CStr(il10A_1) = CStr(il10D_1) And (CStr(il10D_3) = "2" Or CStr(il10D_3) = "6")) Then
+            Debug.Print "9D:" & il9D & " X 10A:" & il10A & " = 10D:" & il10D
+         End If
+      Next il10A_2
+   Next il10A_1
+Next il9D
+
+'Print five digit Squares that end in 76
+For b = 99 To 316
+   If Right(CStr(b * b), 2) = "76" Then
+      l = (792 - (2 * b)) / 2
+      a = b * l
+      If Abs(b - l) < 99 And Abs(b - l) > 10 Then
+         Debug.Print "b=" & b & " b^2=" & b * b & "  length =" & l & "  area =" & a & "   b - l=" & b - l
+      End If
+   End If
+Next b
+
+'Value of DM
+For i = 1 To 9
+   For j = 1 To 99
+      a = CLng(CStr(i & "42"))
+      b = 300 + j
+      If a = b * 0.4 Then
+         Debug.Print "4D:" & a & "   1D:" & b
+      End If
+   Next j
+Next i
+     
+      
+'Print four digit squares that start with 7 'and end in 2
+For i = 32 To 99
+   If Left(CStr(i * i), 1) = "7" Then 'And Right(CStr(i * i), 1) = "2" Then
+      Debug.Print "Lady is " & i & ", i^2 = " & i * i
+   End If
+Next i
+
+For i = 1910 To 1999 'current year
+   For a = 1 To 9
+      If a = 6 Or a = 5 Then
+         dmy = CLng("1" & a & "10")
+         own = i - dmy
+         mby = i - 22
+         If Left(Right(CStr(own), 2), 1) = "2" And Right(CStr(mby), 1) = Left(CStr(own), 1) Then
+            Debug.Print "CY:" & i & "     Owned Since:" & dmy & "     Mary Born:" & mby & "     Owned:" & own
+         End If
+      End If
+   Next a
+Next i
+
+
+'9D:11 X 10A:12 = 10D:132
+'9D:11 X 10A:22 = 10D:242
+'9D:11 X 10A:32 = 10D:352
+'9D:11 X 10A:42 = 10D:462
+'9D:11 X 10A:52 = 10D:572
+'9D:11 X 10A:62 = 10D:682
+'9D:11 X 10A:72 = 10D:792
+'9D:91 X 10A:12 = 10D:1092
+'9D:91 X 10A:22 = 10D:2002
+'b=174 b^2=30276  length =222  area =38628   b - l=-48
+'b=176 b^2=30976  length =220  area =38720   b - l=-44
+'b=224 b^2=50176  length =172  area =38528   b - l=52
+'b=226 b^2=51076  length =170  area =38420   b - l=56
+'4D:142   1D:355
+'Lady is 84, i^2 = 7056
+'Lady is 85, i^2 = 7225
+'Lady is 86, i^2 = 7396
+'Lady is 87, i^2 = 7569
+'Lady is 88, i^2 = 7744
+'Lady is 89, i^2 = 7921
+'CY:1935     Owned Since:1610     Mary Born:1913     Owned:325
+'CY:1936     Owned Since:1510     Mary Born:1914     Owned:426
+
+End Function

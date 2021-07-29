@@ -1,0 +1,22 @@
+Option Compare Database
+Option Explicit
+
+Sub TempConv()
+   Dim kelvin     As Double
+   Dim celsius    As Double
+   Dim fahrenheit As Double
+   Dim rankine    As Double
+   
+   kelvin = 444
+   
+   If kelvin <= 0 Then Exit Sub         ' zero or less ends the program
+   
+   celsius = kelvin - 273.15
+   fahrenheit = kelvin * 1.8 - 459.67
+   rankine = kelvin * 1.8
+   Debug.Print kelvin; " kelvin is equal to "; celsius; " degrees celsius and "; fahrenheit; " degrees fahrenheit and "; rankine; " degrees rankine"
+
+'output:
+'   444  kelvin is equal to  170.85  degrees celsius and  339.53  degrees fahrenheit and  799.2  degrees rankine
+
+End Sub

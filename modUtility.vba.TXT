@@ -1,0 +1,968 @@
+Attribute VB_Name = "modUtility"
+Option Compare Database
+Option Explicit
+
+'******************************************************************************
+'  Module Name   : modUtility
+'  Author        : Michael McGill
+'  Last Updated  : 10/16/2019
+'  Description   : MS Access utility routines to increase productivity and to
+'                  increase quality of delivered solutions.
+'------------------------------------------------------------------------------
+'  Change Log
+'      ChangedBy    Date            Description
+'      MLM          10/01/2019      Added Debug Constant
+'      MLM          10/02/2019      Added ability to ignore errors to
+'                                   mmRunActionQuery
+'      MLM          10/07/2019      Added Global Sys object public variable
+'                                   and SetGlobals function.
+'******************************************************************************
+
+
+'Type return code status values
+Global Const FAILURE = 1
+Global Const SUCCESS = 0
+
+'Controls if execution stop in the error handler, 1 to stop
+Global Const gcfDEBUG = 0   '1 = debug ON, 0 = debug OFF
+
+'Global Sys object for the system global data and services
+Public Sys As clsSys
+
+'Return code structure
+Type Trc
+   status As Byte
+   msg As String
+   routine As String
+   code As Long
+End Type
+
+'Windows INI file read and write functions
+#If Win64 And VBA7 Then
+   Private Declare PtrSafe Function GetPrivateProfileString Lib "Kernel32" Alias "GetPrivateProfileStringA" (ByVal lpApplicationName As String, ByVal lpKeyName As Any, ByVal lpDefault As String, ByVal lpReturnedString As String, ByVal nSize As Long, ByVal lpFileName As String) As Long
+   Private Declare PtrSafe Function WritePrivateProfileString Lib "Kernel32" Alias "WritePrivateProfileStringA" (ByVal lpApplicationName As String, ByVal lpKeyName As Any, ByVal lpString As Any, ByVal lpFileName As String) As Long
+   Private Declare PtrSafe Function GetUserName Lib "advapi32.dll" Alias "GetUserNameA" (ByVal lpBuffer As String, nSize As Long) As Long
+#Else
+   Private Declare Function GetPrivateProfileString Lib "Kernel32" Alias "GetPrivateProfileStringA" (ByVal lpApplicationName As String, ByVal lpKeyName As Any, ByVal lpDefault As String, ByVal lpReturnedString As String, ByVal nSize As Long, ByVal lpFileName As String) As Long
+   Private Declare Function WritePrivateProfileString Lib "Kernel32" Alias "WritePrivateProfileStringA" (ByVal lpApplicationName As String, ByVal lpKeyName As Any, ByVal lpString As Any, ByVal lpFileName As String) As Long
+   Private Declare Function GetUserName Lib "advapi32.dll" Alias "GetUserNameA" (ByVal lpBuffer As String, nSize As Long) As Long
+
+#End If
+
+Public Function SetGlobals(Optional bValidate As Boolean = False) As Boolean
+  ' Create and Initalize global system object
+  
+    If Sys Is Nothing Then
+       Set Sys = New clsSys  'create the global object if it is not created
+    End If
+    
+    
+    If Sys.Init(bValidate) Then
+        'globals initalized
+        SetGlobals = True
+    Else
+        'it failed
+        SetGlobals = False
+        Call MsgBox("System Configuraton Issues " + CRLF + "Contact BMOS Group", vbExclamation, "Configuation Issue")
+    End If
+End Function
+
+Public Function mmDeleteFile(sPathFileName As String) As Boolean
+  ' Comments: Deletes a file if it exists
+  ' Returns : True if it deletes the file, False otherwise.
+  '           When the file does not exits it will return false.
+On Error GoTo Catch:
+    If mmFileExists(sPathFileName) Then
+       'remove readonly attribute, if set
+       'SetAttr sPathFileName, vbNormal
+       'delete the file
+       Kill sPathFileName
+       mmDeleteFile = True
+    Else
+       mmDeleteFile = False
+    End If
+Finally:
+    Exit Function
+Catch:
+    mmDeleteFile = False
+    Resume Finally
+
+End Function
+
+Sub RCClear(ByRef rc As Trc)
+  ' Comments:  Clears the return code structure
+  '
+  ' Params  : Return code structure instance
+  ' Returns : n/a
+
+    rc.msg = ""
+    rc.routine = ""
+    rc.status = SUCCESS
+    rc.code = 0
+End Sub
+
+Sub ErrorLog(ByRef Err As ErrObject, sRoutine As String)
+  ' Comments:  Helper routine to log errors
+  '            Error Codes:
+  '            https://www.fmsinc.com/microsoftaccess/Errors/ErrorNumber_Description2010.html
+  '            My Application Error Number range is from 1005 to 2000
+  ' Params  :  Err object, function or subroutine name
+  ' Returns :  N/A
+
+    Dim sMsg As String
+    Dim sDesc As String
+ 
+    sMsg = sMsg & " - " & Err.Source & "." & sRoutine
+    sMsg = sMsg & " / Error Number: " & CStr(Err.Number) & " "
+
+    If Err.Number < 1005 Or Err.Number > 2000 Then
+        sDesc = Err.Description
+    Else
+        sDesc = Sys.ErrorMessage(Err.Number)
+    End If
+    
+    sMsg = sMsg & " " & sDesc
+    
+    Sys.LogMsg "E", sMsg
+    Debug.Assert (gcfDEBUG = 0)
+End Sub
+
+Sub ErrorRCLog(ByRef rc As Trc, ByRef Err As ErrObject, sRoutine As String)
+ ' Comments:
+ '      Helper routine to set return code and log error
+ '      Error Codes:
+ '      https://www.fmsinc.com/microsoftaccess/Errors/ErrorNumber_Description2010.html
+ '      My Application Error Number range is from 1005 to 2000 '
+ ' Params  : Return code structure, Error Object, subroutine or function name
+ ' Returns : N/A
+
+    rc.status = FAILURE
+    rc.code = Err.Number
+    If Err.Number < 1005 Or Err.Number > 2000 Then
+        rc.msg = Err.Description
+    Else
+        rc.msg = Sys.ErrorMessage(Err.Number)
+    End If
+    
+
+    rc.routine = sRoutine
+    Sys.LogRC rc
+    Debug.Assert (gcfDEBUG = 0)
+    
+End Sub
+
+Function mmRunClearAppendSet(strSetName As String, Optional bUseDisplayName As Boolean = True) As Long
+  'Comment:
+
+    Dim pb As clsProgressBar
+    Dim RS As DAO.Recordset
+    
+On Error GoTo Catch
+
+    Set pb = New clsProgressBar
+    pb.Init ("Clear and Append Queries")
+    
+    
+    Set RS = CurrentDb.OpenRecordset(FormatStr("SELECT * FROM tsysClearAppend WHERE SetName = '{0}' ORDER BY SEQ", strSetName))
+    RS.MoveLast
+    RS.MoveFirst
+    
+    pb.TotalTasks = RS.RecordCount
+    
+    If RS.RecordCount > 0 Then
+        While Not RS.EOF
+            If bUseDisplayName Then
+                pb.TaskName = RS!DisplayName
+            Else
+                pb.TaskName = RS!AppendQuery
+            End If
+            
+            mmTableClearAppend RS!ClearTable, RS!AppendQuery
+            pb.TaskComplete
+            RS.MoveNext
+        Wend
+    End If
+       
+Finally:
+    Set pb = Nothing
+    Exit Function
+    
+Catch:
+    ErrorLog Err, "mmClearAppend"
+    Resume Finally
+  
+End Function
+
+
+
+
+Public Function mmTableClearAppend(sTable As String, sAppendQueryName As String) As Long
+  ' Comments: Delete all records in table and run append action query
+  '
+  ' Params  : Table to delete records, Append Query Name
+  ' Returns : Failure: -1 if table does not exits
+  '           Success: Number of records appended to table
+  
+On Error GoTo Catch
+
+    If mmTableClear(sTable) < 0 Then
+        mmTableClearAppend = -1
+    End If
+    
+    mmTableClearAppend = mmRunActionQuery(sAppendQueryName)
+    
+Finally:
+    
+    Exit Function
+    
+Catch:
+    ErrorLog Err, "mmTableClearAppend"
+    Resume Finally
+  
+End Function
+
+Public Function mmTableClear(sTable As String) As Long
+  ' Comments: Delete all the records in a table
+  '
+  ' Params  : Table Name to delete records
+  ' Returns : Number of records deleted
+   
+
+     Dim db As Database
+     If mmDoesTableExist(sTable) Then
+         Set db = CurrentDb
+         db.Execute "DELETE * FROM " & sTable
+         mmTableClear = db.RecordsAffected
+         Set db = Nothing
+     Else
+         mmTableClear = -1
+     End If
+     
+End Function
+
+Public Function ActionQueryLogHasError() As Boolean
+  ' Comments : Check for a negative return value
+  '
+  ' Params   : NA
+  ' Returns  : True if tsysActionQueryLog does not contain an error code
+  '
+  
+    Dim RS As DAO.Recordset
+    Dim strSql As String
+    
+ On Error GoTo Catch
+   
+    strSql = "SELECT COUNT(*) AS Cnt FROM tsysActionQueryLog WHERE RecordsAffected = -1 "
+    Set RS = CurrentDb.OpenRecordset(strSql)
+    If RS!cnt > 0 Then
+         ActionQueryLogHasError = True
+    Else
+         ActionQueryLogHasError = False
+    End If
+    
+Finally:
+    RS.Close
+    Set RS = Nothing
+    Exit Function
+Catch:
+    ErrorLog Err, "ActionQueryLogHasError"
+    Resume Finally
+End Function
+
+Public Sub ShowActionQueryLog()
+  ' Comments: Show the Action Query Log
+  
+    DoCmd.OpenForm "fdlgActionLog"
+    
+End Sub
+Public Sub ClearActionQueryLog()
+  ' Clear the action query log
+
+    mmTableClear "tsysActionQueryLog"
+    
+End Sub
+
+Public Function mmRunActionQuerySet(strSetName, Optional bUseDisplayName As Boolean = True)
+  ' Comments: Runs a set of Action Queries
+  '
+  '
+  ' Params  : Use Display Name flag determine if you use the Display Name or the Query Name
+  ' Returns : NA - See tsysActionQueryLog for results and function ActionQueryLogHasError
+
+    Dim RS As DAO.Recordset
+    Dim strSql As String
+    Dim pb As clsProgressBar
+    
+On Error GoTo Catch
+
+    Set pb = New clsProgressBar
+    pb.Init "Running Action Query"
+    
+    strSql = " SELECT * " & _
+             " FROM   tsysActionQuery " & _
+             " WHERE  SetName = '{0}' " & _
+             " ORDER BY Seq"
+             
+    strSql = FormatStr(strSql, strSetName)
+    
+    Set RS = CurrentDb.OpenRecordset(strSql)
+    RS.MoveLast
+    RS.MoveFirst
+    
+    pb.TotalTasks = RS.RecordCount
+    
+    If RS.RecordCount > 0 Then
+        While Not RS.EOF
+        
+            If bUseDisplayName Then
+                pb.TaskName = RS!DisplayName
+            Else
+                pb.TaskName = RS!QueryName
+            End If
+            
+            mmRunActionQuery RS!QueryName
+            pb.TaskComplete
+            RS.MoveNext
+        Wend
+    Else
+        'no records to process
+        pb.Done
+    End If
+
+Finally:
+    RS.Close
+    Set RS = Nothing
+    Set pb = Nothing
+    Exit Function
+
+Catch:
+    ErrorLog Err, "mmRunActionQuerySet"
+    Resume Finally
+End Function
+
+Public Function mmRunActionQuery(sQueryName As String, _
+                                 Optional bIgnoreErrors As Boolean = False, _
+                                 Optional bLogging As Boolean = True) As Long
+                                 
+  ' Comments: Run Action query and return the number of rows affected.
+  '           It is strongly recommended to not ignore errors.
+  '
+  ' Params  : sQueryName   : Action Query Name.
+  '           bIgnoreErrors: Ignore errors flag to determine if errors are trapped and logged
+  '                          or ignored. Also determines if the query is done in a transaction.
+  '           bLogging     : Logging Flag to action query log
+  ' Returns : Number of records affected by action query
+
+    Dim db As Database
+    Dim RS As DAO.Recordset
+
+On Error GoTo Catch
+    'assert preconditions
+    If mmDoesQueryExist(sQueryName) = False Then
+        mmRunActionQuery = -1
+        Exit Function
+    End If
+    
+    'Run the action query in a transaction
+    Set db = CurrentDb
+    If bIgnoreErrors Then
+        db.Execute sQueryName
+    Else
+       DBEngine.BeginTrans
+         db.Execute sQueryName, dbFailOnError
+       DBEngine.CommitTrans
+    End If
+    
+    'You have succesfully ran the query, report rows affected
+    mmRunActionQuery = db.RecordsAffected
+    
+Finally:
+    If bLogging Then 'logging success and error
+       Set RS = db.OpenRecordset("tsysActionQueryLog", dbOpenTable)
+       RS.AddNew
+       RS!QueryName = sQueryName
+       RS!RecordsAffected = mmRunActionQuery
+       RS.Update
+       RS.Close
+       Set RS = Nothing
+    End If
+
+    Set db = Nothing
+    Exit Function
+    
+Catch:
+    If bIgnoreErrors = False Then 'used a transacton above
+        DBEngine.Rollback 'has to be first thing
+    End If
+    
+    ErrorLog Err, "mmRunActionQuery: " & sQueryName
+    'Roll back any database changes
+    
+    mmRunActionQuery = -1
+    Resume Finally
+End Function
+
+'Public Function ModuleName() As String
+'    ModuleName = Application.VBE.SelectedVBComponent.Name
+'End Function
+Public Function mmDoesTableExist(strTableName As String) As Boolean
+  ' Comments:  Answers if the table exits?
+  '
+  ' Params  :
+  ' Returns : Returns true if it does exits or false otherwise
+
+    Dim db As DAO.Database
+    Dim td As DAO.TableDef
+    
+    Set db = CurrentDb
+    On Error Resume Next
+    Set td = db.TableDefs(strTableName)
+    mmDoesTableExist = (Err.Number = 0)
+    Err.Clear
+    db.Close
+    Set db = Nothing
+    Set td = Nothing
+    
+End Function
+
+Public Function mmAppendToFileName(ByVal sFileName As String, ByVal sStringToAppend As String) As String
+  ' Comments: Append text to the end of a file name
+  '
+  ' Params  : File Name, String to append
+  ' Returns : File Name with string appended
+    
+    Dim nPeriod As Integer
+    Dim sLeft As String
+    Dim sRight As String
+      
+    ' error handling
+    nPeriod = InStr(1, sFileName, ".") - 1
+    If nPeriod = -1 Then
+        If Len(sFileName) > 0 Then
+            'no period in name give back a .txt extension
+            mmAppendToFileName = sFileName & sStringToAppend & ".txt" 'assume txt
+            Exit Function
+        Else
+            'empty string passed, give one back
+            mmAppendToFileName = ""
+            Exit Function
+        End If
+        Exit Function
+    End If
+      
+    'parse it out into parts and then append the string to the filename
+    sLeft = Mid(sFileName, 1, nPeriod)
+    sRight = Mid(sFileName, nPeriod + 1)
+    mmAppendToFileName = sLeft & sStringToAppend & sRight
+    
+End Function
+
+Public Sub mmExecuteQuery(sQueryName As String)
+  ' Comments: Perform a query with warnings toggled off and then back on
+  '           (This is really not a good practice!)
+  ' Params  : Query Name
+  ' Returns : N/A
+
+     DoCmd.SetWarnings False
+     Call DoCmd.OpenQuery(sQueryName)
+     DoCmd.SetWarnings True
+     DoCmd.Close
+End Sub
+
+Public Function mmReadIniFileString(ByVal Sect As String, ByVal Keyname As String, sIniFileName As String) As String
+  ' Comments: Read an Ini file Section and Key using Windows API
+  '
+  '
+  ' Params  : Section, Key Name, Ini File Name
+  ' Returns : Value for Section and Key Name in Ini File
+
+  Dim Worked As Long
+  Dim RetStr As String * 128
+  Dim StrSize As Long
+  Dim iNoOfCharInIni As Long
+  Dim sIniString As String
+  Dim sProfileString As String
+  
+  iNoOfCharInIni = 0
+  sIniString = ""
+  If Sect = "" Or Keyname = "" Then
+    'MsgBox "Section Or Key To Read Not Specified !!!", vbExclamation, "INI"
+    Debug.Print "Section Or Key To Read Not Specified !!!", vbExclamation, "INI"
+  Else
+    sProfileString = ""
+    RetStr = Space(128)
+    StrSize = Len(RetStr)
+    Worked = GetPrivateProfileString(Sect, Keyname, "", RetStr, StrSize, sIniFileName)
+    If Worked Then
+      iNoOfCharInIni = Worked
+      sIniString = Left$(RetStr, Worked)
+    End If
+  End If
+  mmReadIniFileString = sIniString
+End Function
+
+Public Function mmDeleteIniFileSection(ByVal Sect As String, sIniFileName) As Long
+  ' Comments: Deletes a section in Ini file
+  '
+  ' Params  : Section, Ini File Name
+  ' Returns : value from WritePrivateProfileString
+  
+    mmDeleteIniFileSection = WritePrivateProfileString(Sect, 0&, 0&, sIniFileName)
+    
+End Function
+Public Function mmWriteIniFileString(ByVal Sect As String, ByVal Keyname As String, ByVal Wstr As String, sIniFileName) As String
+  ' Comments:  Write to an INI file Section and Key, Value using Windows API
+  '
+  '
+  ' Params  :  Section, Key Name, Value, Ini File Name
+  ' Returns :
+
+  Dim Worked As Long
+  Dim iNoOfCharInIni As Long
+  Dim sIniString As String
+
+  iNoOfCharInIni = 0
+  sIniString = ""
+  If Sect = "" Or Keyname = "" Then
+    'MsgBox "Section Or Key To Write Not Specified !!!", vbExclamation, "INI"
+    Debug.Print "Section Or Key To Write Not Specified !!!", vbExclamation, "INI"
+  Else
+    Worked = WritePrivateProfileString(Sect, Keyname, Wstr, sIniFileName)
+    If Worked Then
+      iNoOfCharInIni = Worked
+      sIniString = Wstr
+    End If
+    mmWriteIniFileString = sIniString
+  End If
+End Function
+
+Function mmFileExists(s_fileName As String) As Boolean
+  ' Comments: Check if file exists
+  ' Params  : File Name
+  ' Returns : Returns true if file exits
+
+    Dim obj_fso As Object
+
+    Set obj_fso = CreateObject("Scripting.FileSystemObject")
+    mmFileExists = obj_fso.FileExists(s_fileName)
+    Set obj_fso = Nothing
+End Function
+
+Function DirectoryExists(Directory As String) As Boolean
+  ' Comments:
+  '   Does the directory exits and you have access to the directory
+  '   It could exits but you do not have access, which it will still
+  '   return false.
+  '
+  ' Params  : Directory Name
+  ' Returns : True is directory exits, False if it does not
+
+On Error GoTo Catch
+    DirectoryExists = False
+    If Len(Dir(Directory, vbDirectory)) > 0 Then
+        If (GetAttr(Directory) And vbDirectory) = vbDirectory Then
+            DirectoryExists = True
+        End If
+    End If
+    
+Finally:
+    Exit Function
+    
+Catch:
+    DirectoryExists = False
+    Err.Clear
+    Resume Finally
+End Function
+
+
+Public Function GetFileNamesInDirectory(ByVal sPath As String, _
+    Optional ByVal sFilter As String) As String()
+  ' Comments: Returns array of string of file names in a directory
+  '
+  ' Params  : Path of directory, file filter
+  ' Returns : Array of Strings containing file names
+
+    'dynamic array for names
+    Dim aFileNames() As String
+    ReDim aFileNames(0)
+
+    Dim sFile As String
+    Dim nCounter As Long
+
+    If Right(sPath, 1) <> "\" Then
+        sPath = sPath & "\"
+    End If
+
+    If sFilter = "" Then
+        sFilter = "*.*"
+    End If
+
+    'call with path "initializes" the dir function and returns the first file
+    sFile = Dir(sPath & sFilter)
+
+    'call it until there is no filename returned
+    Do While sFile <> ""
+        'store the file name in the array
+        aFileNames(nCounter) = sFile
+        'subsequent calls without param return next file
+        sFile = Dir
+        'make sure your array is large enough for another
+        nCounter = nCounter + 1
+        If nCounter > UBound(aFileNames) Then
+            'preserve the values and grow by reasonable amount for performance
+            ReDim Preserve aFileNames(UBound(aFileNames) + 255)
+        End If
+    Loop
+    'truncate the array to correct size
+    If nCounter < UBound(aFileNames) Then
+        ReDim Preserve aFileNames(0 To nCounter - 1)
+    End If
+    'return the array of file names
+    GetFileNamesInDirectory = aFileNames()
+End Function
+Function RecordCount(RS As DAO.Recordset) As Boolean
+    If Not RS.EOF Then
+       RS.MoveLast
+       RS.MoveFirst
+     End If
+     RecordCount = RS.RecordCount
+End Function
+
+
+Public Function GetWindowsUserName() As String
+  ' Comments: Returns the network login name
+  '
+  ' Params  :
+  ' Returns : Windows Login User Name
+
+    Dim strUserName As String
+    'Create a buffer
+    strUserName = String(100, Chr$(0))
+    'Get user name
+    GetUserName strUserName, 100
+    'Strip the rest of the buffer
+    strUserName = Left$(strUserName, InStr(strUserName, Chr$(0)) - 1)
+    GetWindowsUserName = strUserName
+End Function
+
+
+Public Function SBar(Optional TextToDisplay As String)
+  ' Comments: Updates the status bar depending on the input
+  '    Note that StatusBar will be overwritten if ProgressBar is set or cleared
+  '
+  ' Params  : Updates StatusBar text, Empty string clears status bar
+  ' Returns : n/a
+
+    On Error Resume Next
+    If Not IsMissing(TextToDisplay) Then
+        If TextToDisplay <> "" Then
+            SysCmd acSysCmdSetStatus, TextToDisplay
+        Else
+            SysCmd acSysCmdClearStatus
+        End If
+    Else
+        SysCmd acSysCmdClearStatus
+    End If
+
+End Function
+
+Public Function PBar(Optional TextOrPercent As Variant)
+  ' Comments: Updates the progress bar depending on the input
+  '
+  ' Params  :
+  '   1. Text     Updates ProgressBar title
+  '   2. Number   Updates ProgressBar value
+  '   3. <Empty>  Removes ProgressBar
+  
+  '  ProgressBar is set to a value out of 100 (i.e. a percentage)
+  '
+  '  Note that ProgressBar will be overwritten if StatusBar is set or cleared
+  ' Returns :
+    
+    On Error Resume Next
+    If VarType(TextOrPercent) = vbString Then
+        SysCmd acSysCmdInitMeter, TextOrPercent, 100
+    ElseIf IsNumeric(TextOrPercent) Then
+        SysCmd acSysCmdUpdateMeter, TextOrPercent
+    Else
+        SysCmd acSysCmdRemoveMeter
+        SysCmd acSysCmdClearStatus 'just in case
+    End If
+    
+End Function
+
+
+Public Function mmRunSM37SpoolExtract(sSapInstance As String, sJobName As String, sUserID As String, _
+                                      sDateLow As String, _
+                                      sDateHigh As String, _
+                                      sFileName As String, _
+                                      sFilePath As String, _
+                                      Optional ByVal bUnConverted As Boolean = False, _
+                                      Optional ByVal sTimeLow As String = "00:00:00", _
+                                      Optional ByVal sTimeHigh As String = "24:00:00") As Boolean
+                                      
+  ' Comments: SAP SM37 SAPGUI script
+  '
+  '
+  ' Params  : SAP Instance, SAP Job Name, SAP User ID, SM37 From Date, SM37 To Date, Output File Name, Output File Path
+  '           Unconverted output format, SM37 To Time, SM37 To Date
+  ' Returns : True if success, False if failure
+
+On Error GoTo Catch
+    Dim session As Object
+    Dim SapInstance As String
+ 
+    Set session = SAP_GetSession(sSapInstance, False)
+    If session Is Nothing Then
+        MsgBox "No active SAP session found for """ & SapInstance & """." & vbNewLine & "Please log on to """ & SapInstance & """ and try the operation again.", vbExclamation, Application.CurrentProject.Name
+    Else
+        session.findById("wnd[0]/tbar[0]/btn[3]").press
+        session.findById("wnd[0]/tbar[0]/okcd").text = "sm37"
+        session.findById("wnd[0]").sendVKey 0
+        
+
+        session.findById("wnd[0]/usr/chkBTCH2170-SCHEDUL").Selected = False
+        session.findById("wnd[0]/usr/chkBTCH2170-READY").Selected = False
+        session.findById("wnd[0]/usr/chkBTCH2170-RUNNING").Selected = False
+        session.findById("wnd[0]/usr/chkBTCH2170-ABORTED").Selected = False
+        
+        session.findById("wnd[0]/usr/txtBTCH2170-JOBNAME").text = sJobName
+        session.findById("wnd[0]/usr/txtBTCH2170-USERNAME").text = sUserID
+        session.findById("wnd[0]/usr/ctxtBTCH2170-FROM_DATE").text = sDateLow
+        session.findById("wnd[0]/usr/ctxtBTCH2170-TO_DATE").text = sDateHigh
+        session.findById("wnd[0]/usr/ctxtBTCH2170-FROM_TIME").text = sTimeLow
+        session.findById("wnd[0]/usr/ctxtBTCH2170-TO_TIME").text = sTimeHigh
+        session.findById("wnd[0]/usr/ctxtBTCH2170-TO_TIME").SetFocus
+        session.findById("wnd[0]/usr/ctxtBTCH2170-TO_TIME").caretPosition = 8
+        session.findById("wnd[0]").sendVKey 8  'F8
+        session.findById("wnd[0]/usr/chk[1,12]").Selected = True  'Check mark on job
+        session.findById("wnd[0]").sendVKey 44  'Ctrl-Shift-FF8
+        session.findById("wnd[0]/usr/chk[1,3]").Selected = True  'Check spool item
+        session.findById("wnd[0]/usr/chk[1,3]").SetFocus
+        session.findById("wnd[0]").sendVKey 6   'F6
+        'session.findById("wnd[0]/mbar/menu[5]/menu[5]/menu[2]/menu[1]").Select  'Save to local file
+        session.findById("wnd[0]").sendVKey 48  'Ctrl-Shift-F12, save to local file
+        session.findById("wnd[1]").sendVKey 0   'Enter key, accept dialog defaults of unconverted format
+        session.findById("wnd[1]/usr/ctxtDY_PATH").text = sFilePath
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = sFileName
+        session.findById("wnd[1]/usr/ctxtDY_FILE_ENCODING").text = "4110"
+        session.findById("wnd[1]/usr/ctxtDY_FILE_ENCODING").SetFocus
+        session.findById("wnd[1]/usr/ctxtDY_FILE_ENCODING").caretPosition = 4  'Encoding focus
+        
+        If mmFileExists(sFilePath + sFileName) Then
+            session.findById("wnd[1]").sendVKey 11   'Ctrl-S replace file
+        Else
+            session.findById("wnd[1]").sendVKey 0    'Enter to generate new file
+        End If
+  
+        session.findById("wnd[0]/tbar[0]/btn[3]").press
+        session.findById("wnd[0]/tbar[0]/btn[3]").press
+        session.findById("wnd[0]/tbar[0]/btn[3]").press
+        session.findById("wnd[0]/tbar[0]/btn[3]").press
+   
+    End If
+    
+    mmRunSM37SpoolExtract = True
+    
+Finally:
+    Exit Function
+   
+Catch:
+    ErrorLog Err, "mmRunSM37SpoolExtract"
+    'If Err Then
+    '    If Err.Number = 49 Then 'Bad DLL calling convention
+    '        Resume Next
+    '    Else
+    '        Debug.Print "Error in sub RunSM37SpoolExtract," & Err.Number & " - " & Err.Description & "; "
+    '    End If
+    'End If
+    mmRunSM37SpoolExtract = False
+    Resume Finally
+    
+End Function
+
+
+Sub RemoteAccessCall(sAccessFilePath As String, sSubRoutine As String)
+'// Run subroutine in another MS Access databsase file
+
+    Dim appAccess As Access.Application
+ 
+    'Create instance of Access Application object.
+    Set appAccess = CreateObject("Access.Application")
+    'Open Database in Microsoft Access window.
+    appAccess.OpenCurrentDatabase sAccessFilePath, False
+    'Run Sub procedure.
+    appAccess.Run sSubRoutine
+    Set appAccess = Nothing
+End Sub
+
+
+Sub RunMacro(sMacroName As String)
+'Run Macro, which will be my QueryGroup
+'Macro is responsible for setting warning off and back on
+     DoCmd.RunMacro sMacroName
+End Sub
+
+
+Sub QueryByPrefixShow(sPrefix As String)
+  ' Comments: print out query to immedate window
+  '
+  ' Params  : Query Prefix
+  ' Returns : n/a
+
+
+  Dim db As DAO.Database
+  Dim qdf As DAO.QueryDef
+ 
+  Set db = CurrentDb()
+  For Each qdf In db.QueryDefs
+     If Left(qdf.Name, Len(sPrefix)) = sPrefix Then
+        Debug.Print "--// " + qdf.Name
+        Debug.Print qdf.SQL
+     End If
+  Next qdf
+  Set qdf = Nothing
+  Set db = Nothing
+  
+End Sub
+
+
+Sub RelinkTables(sDatabaseFilePath As String)
+  ' Comments:  Routine to relink the tables automatically to a database file with a path
+  '
+  ' Params  :  sDataBasePath = "C:\NorthWind.mdb"
+  ' Returns :
+    
+    Dim dbs As DAO.Database
+    Dim tdf As DAO.TableDef
+    Dim strTable As String
+    
+    Set dbs = CurrentDb()
+    For Each tdf In dbs.TableDefs
+        If Len(tdf.Connect) > 1 Then 'Only relink linked tables
+            If tdf.Connect <> ";DATABASE=" & sDatabaseFilePath Then 'only relink tables if the are not linked right
+                If Left(tdf.Connect, 4) <> "ODBC" Then 'Don't want to relink any ODBC tables
+                    strTable = tdf.Name
+                    dbs.TableDefs(strTable).Connect = ";DATABASE=" & sDatabaseFilePath
+                    dbs.TableDefs(strTable).RefreshLink
+                End If
+            End If
+        End If
+    Next tdf
+End Sub
+
+Public Function FormatStr(ByVal strText As String, ParamArray Args()) As String
+  ' Comments:  Format a string like .NET's String.Format
+  '
+  ' Params  :  Format string with place holder values like {0} and {1}
+  ' Returns :  Formated string
+
+' © codekabinett.com - You may use, modify, copy, distribute this code as long as this line remains
+' https://codekabinett.com/index.php?Lang=2
+' https://codekabinett.com/rdumps.php?Lang=2&targetDoc=vba-printf-string-format-function
+
+
+    Dim i           As Integer
+    Dim strRetVal   As String
+    Dim startPos    As Integer
+    Dim endPos      As Integer
+    Dim formatString As String
+    Dim argValueLen As Integer
+    strRetVal = strText
+    
+    For i = LBound(Args) To UBound(Args)
+        argValueLen = Len(CStr(i))
+        startPos = InStr(strRetVal, "{" & CStr(i) & ":")
+        If startPos > 0 Then
+            endPos = InStr(startPos + 1, strRetVal, "}")
+            formatString = Mid(strRetVal, startPos + 2 + argValueLen, endPos - (startPos + 2 + argValueLen))
+            strRetVal = Mid(strRetVal, 1, startPos - 1) & Format(Nz(Args(i), ""), formatString) & Mid(strRetVal, endPos + 1)
+        Else
+            strRetVal = Replace(strRetVal, "{" & CStr(i) & "}", Nz(Args(i), ""))
+        End If
+    Next i
+
+    FormatStr = strRetVal
+
+End Function
+
+Public Function mmDoesQueryExist(sQuery As String) As Boolean
+  ' Comments: Answers: Does the Query Exits ?
+  '
+  ' Params  :
+  ' Returns : True if query exits, False if it does not
+
+    Dim qdf As DAO.QueryDef
+    mmDoesQueryExist = False
+    For Each qdf In CurrentDb.QueryDefs
+      If qdf.Name = sQuery Then
+          mmDoesQueryExist = True
+         Exit Function
+      End If
+    Next
+End Function
+
+Function SplitCaps(ByRef strIn As String) As String
+  'Split a string on Capital characters and add space between words
+  
+    Dim objRegex As Object
+    
+    Set objRegex = CreateObject("vbscript.regexp")
+    With objRegex
+        .Global = True
+        .Pattern = "([a-z])([A-Z])"
+        SplitCaps = .Replace(strIn, "$1 $2")
+    End With
+    
+End Function
+
+
+Function FirstCapitalChar(sString As String) As Long
+  'Comment: Find the second capital letter in a string
+  '         and return the position in the string
+  '
+    Dim i As Long
+    Dim strSub As String
+    Dim nAsc As Integer
+    
+    FirstCapitalChar = 0
+    
+    'loop over string 1 char at a time
+    For i = 1 To Len(sString)
+        strSub = Mid(sString, i, 1)
+        nAsc = AscW(strSub)
+        If nAsc >= 65 And nAsc <= 90 Then 'is upper case
+           'found it
+           FirstCapitalChar = i
+           Exit For
+        End If
+    Next i
+    
+End Function
+Function QueryDisplayName(ByVal sPre, ByVal sQueryName As String) As String
+  'Get the Query by Prefix query display name
+    
+    QueryDisplayName = ""
+    
+    'check param
+    If Trim(sQueryName) = "" Then Exit Function
+    
+    'remove prefix from display name string
+    sQueryName = Replace(sQueryName, sPre, "")
+    
+    'remove remaining left most string coding characters
+    sQueryName = Mid(sQueryName, FirstCapitalChar(sQueryName))
+    
+    'split into words on Capitals
+    QueryDisplayName = SplitCaps(sQueryName)
+    
+    
+End Function
+
+Sub ShowForm(strFormName As String)
+    DoCmd.OpenForm strFormName
+End Sub
+
+Sub CloseForm(strFormName As String)
+    DoCmd.Close acForm, strFormName
+End Sub

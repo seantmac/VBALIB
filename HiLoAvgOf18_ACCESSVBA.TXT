@@ -1,0 +1,86 @@
+Option Compare Database
+Option Explicit
+
+Sub HiLoAvgOf18()
+
+   Dim i           As Integer
+   Dim fromno      As Integer
+   Dim tono        As Integer
+   Dim countthem   As Integer
+   Dim sumthem     As Integer
+   Dim numlist(1 To 18) As Integer
+   
+   countthem = 0
+   sumthem = 0
+   
+   numlist(1) = 82
+   numlist(2) = 106
+   numlist(3) = 92
+   numlist(4) = 87
+   numlist(5) = 77
+   numlist(6) = 97
+   numlist(7) = 105
+   numlist(8) = 81
+   numlist(9) = 75
+   numlist(10) = 102
+   numlist(11) = 102
+   numlist(12) = 87
+   numlist(13) = 91
+   numlist(14) = 78
+   numlist(15) = 89
+   numlist(16) = 96
+   numlist(17) = 97
+   numlist(18) = 89
+   
+   ''numlist.Sort
+   Call QuickSort(numlist, LBound(numlist), UBound(numlist))
+   
+   fromno = 4
+   tono = 15
+   
+   For i = fromno To tono
+      countthem = countthem + 1
+      sumthem = sumthem + CInt(numlist(i))
+   Next i
+
+   Debug.Print countthem & " numbers.  " & "Avg= " & Round(sumthem / countthem, 4)
+
+End Sub
+
+
+Public Sub QuickSort(vArray As Variant, inLow As Long, inHi As Long)
+
+  Dim pivot   As Variant
+  Dim tmpSwap As Variant
+  Dim tmpLow  As Long
+  Dim tmpHi   As Long
+
+  tmpLow = inLow
+  tmpHi = inHi
+
+  pivot = vArray((inLow + inHi) \ 2)
+
+  While (tmpLow <= tmpHi)
+
+     While (vArray(tmpLow) < pivot And tmpLow < inHi)
+        tmpLow = tmpLow + 1
+     Wend
+
+     While (pivot < vArray(tmpHi) And tmpHi > inLow)
+        tmpHi = tmpHi - 1
+     Wend
+
+     If (tmpLow <= tmpHi) Then
+        tmpSwap = vArray(tmpLow)
+        vArray(tmpLow) = vArray(tmpHi)
+        vArray(tmpHi) = tmpSwap
+        tmpLow = tmpLow + 1
+        tmpHi = tmpHi - 1
+     End If
+
+  Wend
+
+  If (inLow < tmpHi) Then QuickSort vArray, inLow, tmpHi
+  If (tmpLow < inHi) Then QuickSort vArray, tmpLow, inHi
+
+End Sub

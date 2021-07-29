@@ -1,0 +1,1699 @@
+'Imports System
+'Imports System.Collections.Generic
+'Imports System.Text
+'Imports System.Data.SqlClient
+'Imports System.Reflection
+'Imports System.IO
+'Imports System.Configuration
+
+<Microsoft.VisualBasic.ComClass()> _
+Public Class Engine
+    Private _startTime As Integer
+    Private _solver As String
+    Private _currentDb As EntLib.DAAB = New EntLib.DAAB()
+    Private _lastSql As String
+    Private _dataSet_MiscParams As DataSet
+    Private _miscParams As DataRow
+    Private mlElmCounter As Integer
+    Private _matGenOK As Boolean
+    Private _lpProbInfo As typLPprobInfo
+
+    Public Const COPT_MISC_TABLE_NAME = "tsysMisc"
+    Public Const COPT_PARM_TABLE_NAME = "tsysRunParameters"
+    Public Const COPT_RNNM_TABLE_NAME = "tsysRunName"
+
+    Public Const LP_NAME As String = "NAME"
+    Public Const LP_OBJSENSE As String = "OBJSENSE"
+    Public Const LP_SPACE5 As String = "     "
+    Public Const LP_MAX As String = "MAX"
+    Public Const LP_MIN As String = "MIN"
+    Public Const LP_COL_HEAD As String = "COLUMNS"
+    Public Const LP_ROW_HEAD As String = "ROWS"
+    Public Const LP_RHS_HEAD As String = "RHS"
+    Public Const LP_BND_HEAD As String = "BOUNDS"
+    Public Const LP_END_HEAD As String = "ENDATA"
+    Public Const LP_OBJ_TYPE As String = "N"
+    Public Const LP_OBJ_SENSE_MAX As Byte = 1
+    Public Const LP_OBJ_SENSE_MIN As Byte = 2
+
+    Structure typCoeffType
+        Dim lngID As Integer
+        Dim intActive As Short
+        Dim strType As String
+        Dim strColType As String
+        Dim lngColID As Integer
+        Dim strRowType As String
+        Dim lngRowID As Integer
+        Dim strRecSet As String
+        Dim strCoeffFld As String
+    End Structure
+
+    Structure typColType
+        Dim lngID As Integer
+        Dim intActive As Short
+        Dim strType As String
+        Dim strDesc As String
+        Dim strTable As String
+        Dim strRecSet As String
+        Dim strPrefix As String
+        Dim strColDescFld As String
+        Dim strSOS As String
+        Dim strSOSMarkerFld As String
+        Dim intFREE As Short
+        Dim intINT As Short
+        Dim intBIN As Short
+        Dim strOBJFld As String
+        Dim strLOFld As String
+        Dim strUPFld As String
+        Dim intClassCount As Short
+        Dim strClasses() As String
+    End Structure
+
+    Structure typDatType
+        Dim lngID As Integer
+        Dim intActive As Short
+        Dim intMaster As Short
+        Dim strType As String
+        Dim strDesc As String
+        Dim strTable As String
+        Dim intClassCount As Short
+        Dim strClasses() As String
+        Dim intFieldCount As Short
+    End Structure
+
+    Structure typMPSLP
+        Dim strFileName As String
+        Dim strProblemName As String
+        Dim intOBJSense As Short
+        Dim strOBJRowName As String
+        Dim strRowRS As String
+        Dim strColRS As String
+        Dim strCoeRS As String
+    End Structure
+
+    Structure typRowType
+        Dim lngID As Integer
+        Dim intActive As Short
+        Dim strType As String
+        Dim strDesc As String
+        Dim strTable As String
+        Dim strRecSet As String
+        Dim strPrefix As String
+        Dim strRowDescFld As String
+        Dim strSense As String
+        Dim strRHSFld As String
+        Dim intClassCount As Short
+        Dim strClasses() As String
+    End Structure
+
+    Public Structure typLPprobInfo
+        Dim strProjectName As String    'Project
+        Dim strScenarioName As String   'Scenario/RunName
+        Dim intColCt As Integer
+        Dim intRowCt As Integer
+        Dim intCoefCt As Integer
+        Dim intIntegerCt As Integer     'Integer Variable Count
+        Dim intColNameLength As Integer 'Stdized Col Name Length
+        Dim intRowNameLength As Integer 'Stdized Row Name Length
+        Dim intMasterLength As Integer  'Master Element Name Length
+        Dim intMaxMemory As Integer
+        Dim intMaxItems As Integer      'for XA
+        Dim intOBJSense As Short
+        Dim strOBJRowName As String
+        Dim strRHSName As String
+        Dim strBOUNDSName As String
+    End Structure
+
+    Public Sub New()
+        _lpProbInfo = GetProbInfo()
+        '
+    End Sub
+
+    Protected Overrides Sub Finalize()
+        MyBase.Finalize()
+    End Sub
+
+    Public Function GetConnectionString() As String
+        'ConfigurationManager.ConnectionStrings("DB1").ConnectionString
+
+        Return "Connection String"
+    End Function
+
+    Public Sub RunAll()
+
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+
+        'MsgBox("Wait...")
+        'MsgBox("RunAll underway..." & COPTUtilities.Main.FormatTime(_startTime, My.Computer.Clock.TickCount))
+
+        EntLib.Log.Log("Status", "Entering RunAll...")
+
+        Debug.Print("RunAll...")
+        GetMiscParams()
+        RunSysModelQueries("PREPROC")
+        InitModel()
+        GenElmTbls()
+        PopElmTbls()
+        MatGen()
+        SaveMatrix()
+        Solve()
+        'PostSolve()
+
+        EntLib.Log.Log("C-OPT Engine - RunAll took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+        EntLib.Log.Log("Status", "Exiting RunAll...")
+
+        MsgBox("RunAll completed successfully!" & vbNewLine & "The solution file is located at:" & vbNewLine & My.Application.Info.DirectoryPath & "\" & "ModelName" & "___" & "ProblemName" & ".MPS.sol")
+    End Sub
+
+    Private Sub RunSysModelQueries(ByVal type As String)
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+        Dim dt As DataTable
+        Dim ctr As Integer
+
+        Debug.Print("COPT.Engine.RunSysModelQueries...")
+
+        EntLib.Log.Log("Status", "Entering RunSysModelQueries...")
+
+        ArchiveSysModelQueries()
+
+        _lastSql = "SELECT tsysModelQueries.* " & _
+                 "FROM tsysModelQueries " & _
+                 "WHERE (LEN(tsysModelQueries.Name)>=1) AND " & _
+                 "   (tsysModelQueries.ACTIVE)=True AND " & _
+                 "   (tsysModelQueries.ACTIVE)=True AND " & _
+                 "   (tsysModelQueries.Type='" & type & "') " & _
+                 "ORDER BY tsysModelQueries.ID;"
+
+        dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+        For ctr = 0 To dt.Rows.Count - 1
+            'doevents()
+            _lastSql = dt.Rows(ctr).Item("SQLTEXT").ToString
+            _currentDb.ExecuteNonQuery(_lastSql)
+        Next
+
+        EntLib.Log.Log("Status", "Exiting RunSysModelQueries...")
+        EntLib.Log.Log("C-OPT Engine - RunSysModelQueries took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+    End Sub
+
+    Private Sub ArchiveSysModelQueries()
+        'Dim ds As DataSet
+        Dim dt As DataTable
+
+        _lastSql = "SELECT tsysModelQueries.* FROM tsysModelQueries WHERE LEN(tsysModelQueries.Name)>=1;"
+        dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+
+        '_lastSql = "SELECT * FROM qMSysObjectsType5"
+        'dtQueryList = _currentDb.GetDataSet(_lastSql).Tables(0)
+
+        _lastSql = ""
+
+        'MsgBox("dt: " & dt.Rows.Count)
+
+    End Sub
+
+    Private Sub InitModel()
+        'stm
+        Dim preclen As Short
+        Dim prerlen As Short
+        Dim i As Short
+        Dim userTables As DataTable
+        Dim table As String
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+
+        Debug.Print("InitModel...")
+        EntLib.Log.Log("Status", "Entering InitModel...")
+
+        GetMiscParams()
+
+        'preclen = Len(Trim(moRSMiscParams!LPM_COL_ELEMENT_TABLE_PRE))
+        'prerlen = Len(Trim(moRSMiscParams!LPM_ROW_ELEMENT_TABLE_PRE))
+        preclen = Len(Trim(_miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString))
+        prerlen = Len(Trim(_miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE").ToString))
+
+        'MsgBox("preclen = " & preclen & "; prerlen = " & prerlen)
+
+        userTables = _currentDb.GetTables()
+        'MsgBox("userTables.Rows.Count = " & userTables.Rows.Count)
+
+        'MsgBox("User table count: " & _currentDb.GetUserTables.Rows.Count)
+
+        For i = 0 To userTables.Rows.Count - 1
+            'table = userTables.Rows.Item(0).ToString
+            table = userTables.Rows(i)(2).ToString
+
+            '// Delete all Element Tables //
+            If (Left(table, preclen) = Trim(_miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString)) _
+            Or (Left(table, prerlen) = Trim(_miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE").ToString)) Then
+                'moDAL.DeleteTable(oADOTable.Name) 'delete table
+                'Debug.Print("deleted ... " & oADOTable.Name)
+                'Log(False, "deleted ... " & oADOTable.Name)
+                'Log(False, "deleted ... " & oADOTable.Name)
+
+                _lastSql = "DROP TABLE " & table
+                _currentDb.ExecuteNonQuery(_lastSql)
+                EntLib.Log.Log("Status", "deleted - " & table)
+            End If
+        Next
+
+        _lastSql = "DELETE * FROM " & Trim(_miscParams.Item("LPM_MATRIX_TABLE_NAME").ToString)
+        _currentDb.ExecuteNonQuery(_lastSql)
+
+        _lastSql = "DELETE * FROM " & Trim(_miscParams.Item("LPM_COLUMN_TABLE_NAME").ToString)
+        _currentDb.ExecuteNonQuery(_lastSql)
+
+        _lastSql = "DELETE * FROM " & Trim(_miscParams.Item("LPM_CONSTR_TABLE_NAME").ToString)
+        _currentDb.ExecuteNonQuery(_lastSql)
+
+        _lastSql = "DELETE * FROM " & Trim(_miscParams.Item("LPM_CONSTR_TABLE_NAME_IMPORT").ToString)
+        _currentDb.ExecuteNonQuery(_lastSql)
+
+        _lastSql = "DELETE * FROM " & Trim(_miscParams.Item("LPM_COLUMN_TABLE_NAME_IMPORT").ToString)
+        _currentDb.ExecuteNonQuery(_lastSql)
+
+        EntLib.Log.Log("Status", "Exiting InitModel...")
+        EntLib.Log.Log("C-OPT Engine - InitModel took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+    End Sub
+
+    Private Sub GetMiscParams()
+
+        _lastSql = "SELECT " & COPT_MISC_TABLE_NAME & ".*, " _
+                          & COPT_PARM_TABLE_NAME & ".*, " _
+                          & COPT_RNNM_TABLE_NAME & ".* " _
+              & vbNewLine _
+              & "FROM " & COPT_MISC_TABLE_NAME & ", " _
+                        & COPT_PARM_TABLE_NAME & ", " _
+                        & COPT_RNNM_TABLE_NAME & "; "
+
+        Try
+            _dataSet_MiscParams = _currentDb.GetDataSet(_lastSql) '.Tables(0)
+            '_dataSet_MiscParams.Tables(0).Rows(0).Item("LPM_CONSTR_DEF_TABLE_NAME").ToString
+            _miscParams = _dataSet_MiscParams.Tables(0).Rows(0)
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+
+    End Sub
+
+    '****************************************************************************************
+
+    Public Function GetProbInfo() As typLPprobInfo
+        Dim lp As typLPprobInfo
+        lp.strProjectName = "PROJECTZERO"                                                               'SESSIONIZE
+        lp.strScenarioName = CurrentDb.GetScalerValue("SELECT RUN_NAME FROM qsysMiscParams")            'SESSIONIZE
+        lp.intColCt = CurrentDb.GetScalerValue("SELECT COUNT(*) FROM tsysCol")                          'SESSIONIZE     32  (3)
+        lp.intRowCt = CurrentDb.GetScalerValue("SELECT COUNT(*) FROM tsysRow")                          'SESSIONIZE     30  (4)
+        lp.intCoefCt = CurrentDb.GetScalerValue("SELECT COUNT(*) FROM tsysMtx")                         'SESSIONIZE
+        lp.intIntegerCt = CurrentDb.GetScalerValue("SELECT COUNT(*) FROM tsysCol WHERE INTGR = TRUE")   'SESSIONIZE
+        lp.intColNameLength = CurrentDb.GetScalerValue("SELECT MAX(LEN(COL)) FROM [tsysCOL]")           'SESSIONIZE
+        lp.intRowNameLength = CurrentDb.GetScalerValue("SELECT Max(LEN(ROW)) FROM [tsysROW] ")          'SESSIONIZE
+
+        If lp.intRowNameLength <= lp.intColNameLength Then
+            lp.intMasterLength = lp.intColNameLength
+        Else
+            lp.intMasterLength = lp.intRowNameLength
+        End If
+
+        lp.intMaxMemory = lp.intColCt + lp.intCoefCt + lp.intRowCt + 1
+        lp.intMaxItems = 0
+        lp.intOBJSense = -1 ' -1 = MAX, 0 = MIN
+        lp.strOBJRowName = "PROFIT"
+        lp.strRHSName = "RHS1"
+        lp.strBOUNDSName = "BOUND1"
+        Return lp
+    End Function
+
+    Private Sub GenElmTbls()
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+        Dim dt As DataTable
+        Dim i As Short
+        Dim rowType As typRowType = Nothing
+        Dim colType As typColType = Nothing
+        Dim ret As Short
+
+        Debug.Print("GenElmTbls...")
+        EntLib.Log.Log("Status", "Entering GenElmTbls...")
+
+        '// R O W S //
+        _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_CONSTR_DEF_TABLE_NAME").ToString  'moRSMiscParams!LPM_CONSTR_DEF_TABLE_NAME
+        'Call moDAL.Execute("SELECT * FROM " & moRSMiscParams!LPM_CONSTR_DEF_TABLE_NAME, rs, adCmdText, adOpenDynamic)
+        dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+        'rsClone = rs.Clone()
+        'rsClone.MoveFirst()
+        'While rsClone.EOF = False
+        '    DoEvents()
+        '    rowType = ReadRowType(rsClone!RowTypeID)
+        '    If rowType.intActive Then
+        '        i = CreateRowTable(rowType)
+        '    End If
+        '    rsClone.MoveNext()
+        'End While
+        For i = 0 To dt.Rows.Count - 1
+            rowType = ReadRowType(dt.Rows(i).Item("RowTypeID"))
+            If rowType.intActive Then
+                ret = CreateRowTable(rowType)
+            End If
+        Next
+
+        ''// C O L U M N S //
+        'msLastSQL = "SELECT * FROM " & moRSMiscParams!LPM_COLUMN_DEF_TABLE_NAME
+        'Call moDAL.Execute("SELECT * FROM " & moRSMiscParams!LPM_COLUMN_DEF_TABLE_NAME, rs, adCmdText, adOpenDynamic)
+        'rsClone = rs.Clone()
+        'rsClone.MoveFirst()
+        'While rsClone.EOF = False
+        '    DoEvents()
+        '    colType = ReadColType(rsClone!ColTypeID)
+        '    If colType.intActive Then
+        '        i = CreateColTable(colType)
+        '    End If
+        '    rsClone.MoveNext()
+        'End While
+
+        '// C O L U M N S //
+        _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_COLUMN_DEF_TABLE_NAME").ToString  'moRSMiscParams!LPM_CONSTR_DEF_TABLE_NAME
+        dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+        For i = 0 To dt.Rows.Count - 1
+            colType = ReadColType(dt.Rows(i).Item("ColTypeID").ToString)
+            If colType.intActive Then
+                ret = CreateColTable(colType)
+            End If
+        Next
+
+        EntLib.Log.Log("Status", "Exiting GenElmTbls...")
+        EntLib.Log.Log("C-OPT Engine - GenElmTbls took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+    End Sub
+
+    Private Function ReadRowType(ByVal id As Integer) As typRowType
+        Dim dt As DataTable
+        Dim i As Short
+        Dim ctr As Short
+        Dim rowTemp As typRowType = Nothing
+        Dim strClassConcat As String = ""
+        'Dim ret As Integer
+        Dim classCount As Integer = 0
+
+        _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_CONSTR_DEF_TABLE_NAME").ToString & " WHERE RowTypeID = " & id
+        dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+        'For i = 0 To dt.Rows.Count - 1
+        If dt.Rows.Count > 0 Then
+            If dt.Rows(i).Item("RowTypeID").Equals(id) = True Then
+                With rowTemp
+                    .lngID = dt.Rows(i).Item("RowTypeID")
+                    .intActive = dt.Rows(i).Item("RowActive")
+                    .strType = dt.Rows(i).Item("rowType")
+                    .strDesc = dt.Rows(i).Item("RowTypeDesc")
+                    .strTable = dt.Rows(i).Item("RowTypeTable")
+                    .strRecSet = dt.Rows(i).Item("RowTypeRecSet")
+                    .strPrefix = dt.Rows(i).Item("RowTypePrefix")
+                    .strRowDescFld = dt.Rows(i).Item("RowDescField")
+                    .strSense = dt.Rows(i).Item("RowTypeSNS")
+                    .strRHSFld = dt.Rows(i).Item("RHSField")
+                    .intClassCount = CountRowClasses(rowTemp.strType)    '// Count the Classes
+
+                    ReDim rowTemp.strClasses(rowTemp.intClassCount)
+
+                    '// Loop through the classes
+                    For ctr = 1 To rowTemp.intClassCount
+                        'rowTemp.strClasses(ctr) = rs("R" & ctr)                      '// Load the array
+                        rowTemp.strClasses(ctr) = dt.Rows(0).Item("R" & ctr).ToString
+                        If Brack(dt.Rows(0).Item("R" & ctr).ToString) = "[]" Then
+                            'do nothing
+                        Else
+                            classCount = classCount + 1
+                            strClassConcat = strClassConcat & Brack(dt.Rows(0).Item("R" & ctr).ToString)     '// Make the Concat string
+                        End If
+
+                        'strClassConcat = String.Concat(strClassConcat & Brack(dt.Rows(ctr).Item("R" & ctr).ToString))
+                        'String.Concat(strClassConcat, Brack(dt.Rows(0).Item("R" & ctr).ToString))
+
+                    Next
+
+                    _lastSql = "UPDATE " & _miscParams.Item("LPM_CONSTR_DEF_TABLE_NAME").ToString & " SET ClassCount = " & classCount & ", ClassConcat = '" & strClassConcat & "'"
+
+                    'rsElements.Tables(0).Rows(i2)(colTemp.strType & "ID") = mlElmCounter
+                    dt.Rows(i)("ClassCount") = classCount
+                    dt.Rows(i)("ClassConcat") = strClassConcat
+                    _currentDb.UpdateDataSet(dt, "SELECT * FROM " & _miscParams.Item("LPM_CONSTR_DEF_TABLE_NAME").ToString)
+
+                    'EntLib.Log.Log("C-OPTEngine.Engine.ReadRowType", _lastSql)
+                    'ret = _currentDb.ExecuteNonQuery(_lastSql)
+
+                End With
+            End If
+            'Next
+        End If
+
+        Return rowTemp
+    End Function
+
+    Private Function ReadColType(ByVal id As Integer) As typColType
+        Dim dt As DataTable
+        Dim i As Short = 0
+        Dim ctr As Short
+        Dim colTemp As typColType = Nothing
+        Dim strClassConcat As String = ""
+        Dim ret As Integer
+
+        _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_COLUMN_DEF_TABLE_NAME").ToString & " WHERE ColTypeID = " & id
+        dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+        'For i = 0 To dt.Rows.Count - 1
+        If dt.Rows.Count > 0 Then
+            If dt.Rows(i).Item("ColTypeID").Equals(id) = True Then
+                With colTemp
+                    .lngID = dt.Rows(i).Item("ColTypeID")
+                    .intActive = dt.Rows(i).Item("ColActive")
+                    .strType = dt.Rows(i).Item("colType")
+                    .strDesc = dt.Rows(i).Item("ColTypeDesc")
+                    .strTable = dt.Rows(i).Item("ColTypeTable")
+                    .strRecSet = dt.Rows(i).Item("ColTypeRecSet")
+                    .strPrefix = dt.Rows(i).Item("ColTypePrefix")
+                    .strColDescFld = dt.Rows(i).Item("ColDescField")
+                    .strSOS = dt.Rows(i).Item("SOSTYPE")
+                    .strSOSMarkerFld = dt.Rows(i).Item("SOSMarkerField")
+                    .intFREE = dt.Rows(i).Item("BNDFree")
+                    .intINT = dt.Rows(i).Item("BNDInteger")
+                    .intBIN = dt.Rows(i).Item("BNDBinary")
+                    .strOBJFld = dt.Rows(i).Item("OBJField")
+                    .strLOFld = dt.Rows(i).Item("BNDLoField")
+                    .strUPFld = dt.Rows(i).Item("BNDUpField")
+                    .intClassCount = CountColClasses(colTemp.strType)    '// Count the Classes
+
+                    ReDim colTemp.strClasses(colTemp.intClassCount)
+
+                    '// Loop through the classes
+                    For ctr = 1 To colTemp.intClassCount
+                        'rowTemp.strClasses(ctr) = rs("C" & ctr)                      '// Load the array
+                        colTemp.strClasses(ctr) = dt.Rows(i).Item("C" & ctr).ToString
+                        'strClassConcat = strClassConcat & Brack(rs("R" & ctr))     '// Make the Concat string
+                        'strClassConcat = String.Concat(strClassConcat & Brack(dt.Rows(ctr).Item("R" & ctr).ToString))
+                        'String.Concat(strClassConcat, Brack(dt.Rows(i).Item("C" & ctr).ToString))
+                        strClassConcat = strClassConcat & Brack(dt.Rows(i).Item("C" & ctr).ToString)
+                    Next
+
+                    _lastSql = "UPDATE " & _miscParams.Item("LPM_COLUMN_DEF_TABLE_NAME").ToString & " SET ClassCount = " & colTemp.intClassCount & ", ClassConcat = '" & strClassConcat & "'"
+                    ret = _currentDb.ExecuteNonQuery(_lastSql)
+
+                End With
+            End If
+            'Next
+        End If
+
+        Return colTemp
+    End Function
+
+    Private Function Brack(ByVal strIn As String) As String
+
+        Return "[" & strIn & "]"
+
+    End Function
+
+    Private Function CreateRowTable(ByVal rowTemp As typRowType) As Short
+        Dim i As Short
+        Dim fieldLength As Short = _miscParams.Item("LPM_TEXT_LENGTH").ToString
+        Dim tableName As String = _miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE").ToString & rowTemp.strTable
+        Dim fieldKey As String = rowTemp.strType & "Key"
+        Dim field1 As String = rowTemp.strType & "ID"
+        Dim field2 As String = rowTemp.strType & "Code"
+        Dim field3 As String = rowTemp.strType & "Desc"
+
+        '_lastSql = "CREATE TABLE " & tableName & " (" & rowTemp.strType & "Key, " & rowTemp.strType & "ID, INT, Code VARCHAR(" & _miscParams.Item("LPM_TEXT_LENGTH").ToString & "), [Desc] VARCHAR(" & _miscParams.Item("LPM_TEXT_LENGTH").ToString & ")"
+        _lastSql = "CREATE TABLE " & tableName & " (" & fieldKey & " IDENTITY PRIMARY KEY, " & field1 & " INT, " & field2 & " VARCHAR(" & fieldLength & "), " & field3 & " VARCHAR(" & fieldLength & ")"
+
+        For i = 1 To rowTemp.intClassCount
+            If rowTemp.strClasses(i).ToString <> "" Then
+                _lastSql = _lastSql & " ," & rowTemp.strClasses(i) & " VARCHAR(" & fieldLength & ")"
+            End If
+
+            'TODO:
+            'Indexes not created - Left out
+        Next
+
+        _lastSql = _lastSql & " ,RHS FLOAT, SENSE VARCHAR(1), ACTIVITY FLOAT, SHADOW FLOAT)"
+        Try
+            Debug.Print(_lastSql)
+            Return _currentDb.ExecuteNonQuery(_lastSql)
+        Catch ex As Exception
+            'MessageBox.Show(ex.Message)
+            Return Nothing
+        End Try
+
+    End Function
+
+    Private Function CreateColTable(ByVal colTemp As typColType) As Short
+        Dim i As Short
+        Dim fieldLength As Short = _miscParams.Item("LPM_TEXT_LENGTH").ToString
+        Dim tableName As String = "[" & _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString & colTemp.strTable & "]"
+        Dim fieldKey As String = "[" & colTemp.strType & "Key]"
+        Dim field1 As String = "[" & colTemp.strType & "ID]"
+        Dim field2 As String = "[" & colTemp.strType & "Code]"
+        Dim field3 As String = "[" & colTemp.strType & "Desc]"
+        Dim field4 As String = "[SOSTYPE]"
+        Dim field5 As String = "[SOSMARKER]"
+        Dim field6 As String = "[FREE]"
+        Dim field7 As String = "[INTGR]"
+        Dim field8 As String = "[BINRY]"
+        Dim field9 As String = "[OBJ]"
+        Dim field10 As String = "[LO]"
+        Dim field11 As String = "[UP]"
+        Dim field12 As String = "[ACTIVITY]"
+        Dim field13 As String = "[DJ]"
+        Dim field14 As String = "[STATUS]"
+
+        '_lastSql = "CREATE TABLE " & tableName & " (ID INT, Code VARCHAR(" & _miscParams.Item("LPM_TEXT_LENGTH").ToString & "), [Desc] VARCHAR(" & _miscParams.Item("LPM_TEXT_LENGTH").ToString & ")"
+        '_lastSql = _lastSql & " , SOSTYPE INT, SOSMARKER VARCHAR(" & _miscParams.Item("LPM_TEXT_LENGTH").ToString & "), FREE BIT, INTGR BIT, BINRY BIT"
+        _lastSql = "CREATE TABLE " & tableName & _
+            " (" & fieldKey & " IDENTITY PRIMARY KEY, " & field1 & " INT, " & field2 & " VARCHAR(" & fieldLength & "), " & field3 & " VARCHAR(" & fieldLength & "), " & _
+            field4 & " INT, " & field5 & " VARCHAR(" & fieldLength & "), " & field6 & " BIT, " & field7 & " BIT, " & _
+            field8 & " BIT"
+
+        For i = 1 To colTemp.intClassCount
+            If colTemp.strClasses(i) <> "" Then
+                _lastSql = _lastSql & " ,[" & colTemp.strClasses(i) & "] VARCHAR(" & fieldLength & ")"
+                'TODO:
+                'Indexes not created - Left out
+            End If
+        Next
+
+        _lastSql = _lastSql & ", " & field9 & " FLOAT, " & field10 & " FLOAT, " & field11 & " FLOAT, " & _
+            field12 & " FLOAT, " & field13 & " FLOAT, " & field14 & " VARCHAR(" & fieldLength & "))"
+        Try
+            Debug.Print(_lastSql)
+            Return _currentDb.ExecuteNonQuery(_lastSql)
+        Catch ex As Exception
+            'MessageBox.Show(ex.Message)
+            Return Nothing
+        End Try
+
+    End Function
+
+    Private Function CountRowClasses(ByVal strRowType As String) As Short
+        Dim intCount As Short = 0
+        Dim i As Short
+        Dim strRowClassField As String = ""
+        Dim dt As DataTable = Nothing
+
+
+        For i = 1 To _miscParams.Item("LPM_MAX_ELEMENT_CLASSES").ToString
+            _lastSql = ""
+            strRowClassField = "R" & CStr(i)
+            _lastSql = "SELECT " & strRowClassField & " FROM " & _miscParams.Item("LPM_CONSTR_DEF_TABLE_NAME").ToString _
+                     & " WHERE RowType = " & "'" & strRowType & "'"
+            dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+            'If dt.Rows.Count = 0 Then Exit For
+            If dt.Rows(0).Item(0).ToString = "" Then Exit For
+            intCount = intCount + 1
+        Next
+
+        Return intCount
+    End Function
+
+    Private Function CountColClasses(ByVal strColType As String) As Short
+        Dim intCount As Short = 0
+        Dim i As Short
+        Dim strColClassField As String = ""
+        Dim dt As DataTable = Nothing
+
+
+        For i = 1 To _miscParams.Item("LPM_MAX_ELEMENT_CLASSES").ToString
+            _lastSql = ""
+            strColClassField = "C" & CStr(i)
+            _lastSql = "SELECT " & strColClassField & " FROM " & _miscParams.Item("LPM_COLUMN_DEF_TABLE_NAME").ToString _
+                     & " WHERE ColType = " & "'" & strColType & "'"
+            dt = _currentDb.GetDataSet(_lastSql).Tables(0)
+            If dt.Rows(0).Item(0).ToString = "" Then Exit For
+            intCount = intCount + 1
+        Next
+
+        Return intCount
+    End Function
+
+    Private Sub PopElmTbls()
+        '//================================================================================//
+        '/|   FUNCTION: PopElmTbls
+        '/| PARAMETERS: -NONE-
+        '/|    RETURNS: True on Success and False by default or Failure
+        '/|    PURPOSE: Populate the tables that store individual LP vectors and rows
+        '/|      USAGE: i= PopElmTbls()
+        '/|         BY: Sean
+        '/|       DATE: 01/07/2004
+        '/|    HISTORY: 3/27/97  Added feature to generate the append queries
+        '/|                      automatically, then run them.
+        '//================================================================================//
+
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+        Dim rsDefs As DataTable
+        'Dim rs As DataTable
+        Dim rsElements As DataSet 'DataTable
+        Dim colTemp As typColType
+        Dim intIgNull As Boolean = True
+        Dim s As String
+        Dim sTemp As String
+        Dim sTemp2 As String
+        Dim mlElmCounter As Short
+        Dim i As Short
+        Dim i2 As Short
+        Dim rowCount As Integer
+        Dim insertCommand As System.Data.Common.DbCommand = Nothing
+        Dim updateCommand As System.Data.Common.DbCommand = Nothing
+        Dim deleteCommand As System.Data.Common.DbCommand = Nothing
+        Dim rowTemp As typRowType
+
+        Debug.Print("PopElmTbls...")
+        EntLib.Log.Log("Status", "Entering PopElmTbls...")
+
+        '// C O L U M N S //
+        '
+        _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_COLUMN_DEF_TABLE_NAME").ToString
+        'Call moDAL.Execute("SELECT * FROM " & moRSMiscParams!LPM_COLUMN_DEF_TABLE_NAME, rsDefs, adCmdText, adOpenDynamic)
+        rsDefs = _currentDb.GetDataSet(_lastSql).Tables(0)
+        'rsDefs.MoveFirst()
+        intIgNull = True
+
+        s = "----- C O L U M N S -----"
+        Debug.Print(s)
+        'Log(False, s)
+        EntLib.Log.Log("Status", s)
+        mlElmCounter = 0
+        'If gFormRunFlag Then gtxtDest.Value = gtxtDest.Value & s & vbNewLine
+
+        'While rsDefs.EOF = False
+        For i = 0 To rsDefs.Rows.Count - 1
+
+            colTemp = ReadColType(rsDefs.Rows(i).Item("ColTypeID").ToString)
+            If colTemp.intActive Then
+                _lastSql = ""
+                _lastSql = MakePopColQry(colTemp)
+                s = colTemp.strType
+                sTemp2 = _lastSql
+                Debug.Print(s & " ... ")
+                'Log(False, s & " ... ")
+                EntLib.Log.Log("Status", s & " ... ")
+                'If gFormRunFlag Then gtxtDest.Value = gtxtDest.Value & s & vbNewLine
+
+
+                'rs = moDAL.oADOConn.Execute(strSQL, lRet)
+                'rs = _currentDb.GetDataSet(_lastSql).Tables(0)
+                rowCount = _currentDb.ExecuteNonQuery(_lastSql)
+
+                '*&*
+                'Call moDAL.Execute(strSQL, rs, adCmdStoredProc, adExecuteNoRecords) '// EXECUTE THE INSERT/APPEND
+                '-------------
+                'Call moDAL.Execute(strSQL, rs, adCmdText, adOpenDynamic) '// EXECUTE THE INSERT/APPEND
+                '-----------
+                '// EXECUTE THE INSERT/APPEND
+                'Call moDAL.Execute(strSQL, rs, adExecuteNoRecords + adCmdText, adOpenForwardOnly)
+                '---------
+                'moDAL.oADOConn.Execute strSQL, lRet, adExecuteNoRecords + adCmdText
+                'Call WaitSecs(6)
+                'For i = 0 To moDAL.oADOConn.Properties.Count - 1
+                'Debug.Print moDAL.oADOConn.Properties.Item(i).Name & " - " & _
+                '            moDAL.oADOConn.Properties.Item(i).Value
+                'Log False, moDAL.oADOConn.Properties.Item(i).Name & " - " & _
+                '            moDAL.oADOConn.Properties.Item(i).Value
+                'Next i
+                'MsgBox colTemp.strType & " Done with INSERT.  Continue? ", vbOKOnly
+
+                'update the counter field for each element
+                '
+                _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString & colTemp.strTable
+                'Call moDAL.Execute(strSQL, rsElements, adCmdText, adOpenDynamic)
+                'rsElements.MoveFirst()
+                rsElements = _currentDb.GetDataSet(_lastSql) '.Tables(0)
+
+                Debug.Print("   " & rsElements.Tables(0).Rows.Count)
+                'Log(False, "   " & rsElements.Rows.Count)
+                EntLib.Log.Log("Status", rsElements.Tables(0).Rows.Count)
+
+                'Do While rsElements.EOF = False
+                '    DoEvents()
+                '    mlElmCounter = mlElmCounter + 1
+                '    rsElements(colTemp.strType & "ID") = mlElmCounter
+                '    rsElements.UpdateBatch()
+                '    rsElements.MoveNext()
+                'Loop
+
+
+                'mlElmCounter = 0
+                For i2 = 0 To rsElements.Tables(0).Rows.Count - 1
+                    'mlElmCounter = 0
+                    mlElmCounter = mlElmCounter + 1
+                    'rsElements(colTemp.strType & "ID") = mlElmCounter
+                    'rsElements.Columns(colTemp.strType & "ID") = mlElmCounter
+                    rsElements.Tables(0).Rows(i2)(colTemp.strType & "ID") = mlElmCounter
+                    'rsElements.AcceptChanges()
+                    'rsElements.Tables(0).AcceptChanges()
+
+                    '_lastSql = "UPDATE " & _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString & colTemp.strTable & " SET " & colTemp.strType & "ID" & " = " & mlElmCounter & " WHERE "
+
+                Next
+                _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString & colTemp.strTable
+                rowCount = _currentDb.UpdateDataSet(rsElements, _lastSql)
+                'rowCount = _currentDb.UpdateDataSet(rsElements, _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString & colTemp.strTable, insertCommand, updateCommand, deleteCommand)
+
+                'Now make the query to transfer the records to sysCOL and Run It
+                sTemp = _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString & colTemp.strTable
+                _lastSql = "INSERT INTO " & _miscParams.Item("LPM_COLUMN_TABLE_NAME").ToString & " " & vbNewLine & _
+                            "   ( [ColID], [COL], [DESC], SOSTYPE, SOSMARKER, FREE, INTGR, BINRY, OBJ, LO, UP )" & vbNewLine & _
+                         "SELECT " & vbNewLine & _
+                            sTemp & "." & s & "ID," & vbNewLine & _
+                            sTemp & "." & s & "Code," & vbNewLine & _
+                            sTemp & "." & s & "Desc," & vbNewLine & _
+                            sTemp & ".SOSTYPE, " & vbNewLine & _
+                            sTemp & ".SOSMARKER, " & vbNewLine & _
+                            sTemp & ".FREE, " & vbNewLine & _
+                            sTemp & ".INTGR, " & vbNewLine & _
+                            sTemp & ".BINRY, " & vbNewLine & _
+                            sTemp & ".OBJ, " & vbNewLine & _
+                            sTemp & ".LO, " & vbNewLine & _
+                            sTemp & ".UP " & vbNewLine & _
+                         "FROM " & sTemp & " " & vbNewLine & _
+                         ";"
+                'msLastSQL = strSQL
+                'Call moDAL.Execute(strSQL, rs, adCmdText, adOpenDynamic) '// EXECUTE THE INSERT/APPEND TO sysCOL
+                Debug.Print(_lastSql)
+                rowCount = _currentDb.ExecuteNonQuery(_lastSql)
+            End If
+        Next
+
+        Debug.Print("COLS:  " & mlElmCounter)
+        EntLib.Log.Log("C-OPT Engine - PopElmTbls - ", "COLS:  " & mlElmCounter)
+
+        '// R O W S //
+        _lastSql = "SELECT * FROM " & _miscParams("LPM_CONSTR_DEF_TABLE_NAME")
+        rsDefs = _currentDb.GetDataSet(_lastSql).Tables(0)
+        intIgNull = True
+        s = "----- R O W S -----"
+        Debug.Print(s)
+        EntLib.Log.Log("C-OPT Engine - PopElmTbls - ", s)
+        mlElmCounter = 0
+
+        For i = 0 To rsDefs.Rows.Count - 1
+            'rowTemp = ReadRowType(rsDefs!RowTypeID)
+            rowTemp = ReadRowType(rsDefs.Rows(i).Item("RowTypeID").ToString)
+            If rowTemp.intActive Then
+                _lastSql = MakePopRowQry(rowTemp)
+                s = rowTemp.strType
+                Debug.Print(s & " ... ")
+                EntLib.Log.Log("C-OPT Engine - PopElmTbls - ", s & " ... ")
+                'rs = _currentDb.GetDataSet(_lastSql).Tables(0)
+                rowCount = _currentDb.ExecuteNonQuery(_lastSql)
+
+                _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE") & rowTemp.strTable
+                rsElements = _currentDb.GetDataSet(_lastSql)
+
+                Debug.Print("   " & rsElements.Tables(0).Rows.Count)
+                EntLib.Log.Log("C-OPT Engine - PopElmTbls - ", "   " & rsElements.Tables(0).Rows.Count)
+
+
+                'mlElmCounter = 0
+                For i2 = 0 To rsElements.Tables(0).Rows.Count - 1
+                    'mlElmCounter = 0
+                    mlElmCounter = mlElmCounter + 1
+                    'rsElements(colTemp.strType & "ID") = mlElmCounter
+                    'rsElements.Columns(colTemp.strType & "ID") = mlElmCounter
+                    rsElements.Tables(0).Rows(i2)(rowTemp.strType & "ID") = mlElmCounter
+                    'rsElements.AcceptChanges()
+                    'rsElements.Tables(0).AcceptChanges()
+
+                    '_lastSql = "UPDATE " & _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString & colTemp.strTable & " SET " & colTemp.strType & "ID" & " = " & mlElmCounter & " WHERE "
+
+                Next
+                _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE") & rowTemp.strTable
+                rowCount = _currentDb.UpdateDataSet(rsElements, _lastSql)
+
+                'Now make the query to transfer the records to sysCOL and Run It
+                sTemp = _miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE").ToString & rowTemp.strTable
+                _lastSql = "INSERT INTO " & _miscParams.Item("LPM_CONSTR_TABLE_NAME").ToString & " " & vbNewLine & _
+                            "   ( [RowID], [ROW], [DESC], RHS, SENSE )" & vbNewLine & _
+                         "SELECT " & vbNewLine & _
+                            sTemp & "." & s & "ID," & vbNewLine & _
+                            sTemp & "." & s & "Code," & vbNewLine & _
+                            sTemp & "." & s & "Desc," & vbNewLine & _
+                            sTemp & ".RHS, " & vbNewLine & _
+                            sTemp & ".SENSE " & vbNewLine & _
+                         "FROM " & sTemp & " " & vbNewLine & _
+                         ";"
+                'Call moDAL.Execute(strSQL, rs, adCmdText, adOpenDynamic) '// EXECUTE THE INSERT/APPEND TO sysCOL
+                'rs = _currentDb.GetDataSet(_lastSql).Tables(0)
+                rowCount = _currentDb.ExecuteNonQuery(_lastSql)
+
+            End If
+        Next
+
+        Debug.Print("ROWS:  " & mlElmCounter)
+        EntLib.Log.Log("C-OPT Engine - PopElmTbls - ", "ROWS:  " & mlElmCounter)
+
+        EntLib.Log.Log("Status", "Exiting PopElmTbls...")
+        EntLib.Log.Log("C-OPT Engine - PopElmTbls took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+    End Sub
+
+    Private Function MakePopColQry(ByVal coltemp As typColType) As String
+        Dim strINS As String, strSQL As String, strSelObj As String, strVectorName As String
+        Dim strColClass As String
+        Dim j As Long
+
+
+        strINS = "INSERT INTO " & _miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString() & coltemp.strTable _
+                 & " ( [" & coltemp.strType & "ID], "
+        strSQL = strINS
+        strSelObj = ""
+        strVectorName = "'C" & coltemp.strPrefix & "' "
+
+        For j = 1 To coltemp.intClassCount
+            strSQL = strSQL & Brack(coltemp.strClasses(j)) & ", "
+            strColClass = coltemp.strClasses(j)
+            strSelObj = strSelObj & "CStr(" & Brack(coltemp.strRecSet) & "." & Brack(strColClass) & ") AS " & Brack(strColClass) & ", " & vbNewLine
+            'strVectorName = strVectorName & Chr(38) & " " & "'" & "_" & "'" & " " & Chr(38) & " " & Brack(strColClass) & " "
+            strVectorName = strVectorName & "&" & " " & "'" & "_" & "'" & " " & "&" & " " & Brack(strColClass) & " "
+        Next j
+
+        'If Len(colTemp.strOBJFld) > 0 Then
+        strSQL = strSQL & "[OBJ], "
+        'End If
+
+        'If Len(colTemp.strLOFld) > 0 Then
+        strSQL = strSQL & "[LO], "
+        'End If
+
+        'If Len(colTemp.strUPFld) > 0 Then
+        strSQL = strSQL & "[UP], " & vbNewLine
+        'End If
+
+        'If Len(colTemp.strSOS) > 0 Then
+        strSQL = strSQL & "[SOSTYPE], "
+        'End If
+
+        'If Len(colTemp.strSOSMarkerFld) > 0 Then
+        strSQL = strSQL & "[SOSMARKER], "
+        'End If
+
+        'If colTemp.intFREE < 0 Then
+        strSQL = strSQL & "[FREE], "
+        'End If
+
+        'If colTemp.intINT < 0 Then
+        strSQL = strSQL & "[INTGR], "
+        'End If
+
+        'If colTemp.intBIN < 0 Then
+        strSQL = strSQL & "[BINRY], "
+        'End If
+
+        strSQL = strSQL & coltemp.strType & "Code, " & coltemp.strType & "Desc )" & vbNewLine
+        strSQL = strSQL & "SELECT DISTINCT" & vbNewLine & "0 AS VECTORID," & vbNewLine
+        strSQL = strSQL & strSelObj
+
+        'If Len(colTemp.strOBJFld) > 0 Then
+        strSQL = strSQL & coltemp.strRecSet & "." & coltemp.strOBJFld & " AS [OBJ], " & vbNewLine
+        'End If
+
+        'If Len(colTemp.strLOFld) > 0 Then
+        strSQL = strSQL & coltemp.strRecSet & "." & coltemp.strLOFld & " AS [LO], " & vbNewLine
+        'End If
+
+        'If Len(colTemp.strUPFld) > 0 Then
+        strSQL = strSQL & coltemp.strRecSet & "." & coltemp.strUPFld & " AS [UP], " & vbNewLine
+        'End If
+
+        'If Len(colTemp.strSOS) > 0 Then
+        strSQL = strSQL & coltemp.strSOS & " AS [SOSTYPE], " & vbNewLine
+        'End If
+
+        'If Len(colTemp.strSOSMarkerFld) > 0 Then
+        strSQL = strSQL & "'" & coltemp.strSOSMarkerFld & "'" & " AS [SOSMARKER], " & vbNewLine
+        'End If
+
+        'If colTemp.intFREE < 0 Then
+        strSQL = strSQL & coltemp.intFREE & " AS [FREE], " & vbNewLine
+        'End If
+
+        'If colTemp.intINT < 0 Then
+        strSQL = strSQL & coltemp.intINT & " AS [INTGR], " & vbNewLine
+        'End If
+
+        'If colTemp.intBIN < 0 Then
+        strSQL = strSQL & coltemp.intBIN & " AS [BINRY], " & vbNewLine
+        'End If
+
+        strVectorName = " " & strVectorName & " AS [VectorName]," & vbNewLine
+
+
+        strSQL = strSQL & strVectorName & "Left(" & Brack(coltemp.strColDescFld) & "," & _miscParams.Item("LPM_TEXT_LENGTH").ToString() & ") AS [VectorDesc]" & vbNewLine
+
+        strSQL = strSQL & "FROM " & Brack(coltemp.strRecSet) & vbNewLine
+        strSQL = strSQL & ";"
+
+        Return strSQL
+
+    End Function
+
+    Private Function MakePopRowQry(ByVal rowTemp As typRowType) As String
+        '//================================================================================//
+        '/|   FUNCTION: MakeRowColQry
+        '/| PARAMETERS: rowTemp, a UDT variable containing the RowType
+        '/|    RETURNS: SQL String that is the append query used to Populate the
+        '/|                 rowType 's Element Table or "FALSE" on Failure
+        '/|    PURPOSE: Create an append query that will populate Elm Table
+        '/|      USAGE: s = MakePopRowQry(rowTemp)
+        '/|         BY: Sean
+        '/|       DATE: 01/10/2004
+        '/|    HISTORY: 01/10/2004 Originally Adapted to ADO
+        '//================================================================================//
+
+
+        Dim strINS As String, strSQL As String, strSelObj As String, strConstraintName As String
+        Dim strRowClass As String
+        Dim j As Long
+
+        MakePopRowQry = "FALSE"
+
+
+        strINS = "INSERT INTO " & _miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE").ToString() & rowTemp.strTable _
+                 & " ( " & rowTemp.strType & "ID, "
+        strSQL = strINS
+        strSelObj = ""
+        strConstraintName = "'" & rowTemp.strPrefix & "' "
+
+        For j = 1 To rowTemp.intClassCount
+
+            strRowClass = rowTemp.strClasses(j)
+            If strRowClass <> "" Then
+                strSQL = strSQL & Brack(rowTemp.strClasses(j)) & ", "
+                Debug.Print(Brack(rowTemp.strRecSet))
+                Debug.Print(Brack(strRowClass))
+                Debug.Print(Brack(strRowClass))
+                strSelObj = strSelObj & Brack(rowTemp.strRecSet) & "." & Brack(strRowClass) & " AS " & Brack(strRowClass) & ", " & vbNewLine
+                strConstraintName = strConstraintName & Chr(38) & " " & "'" & "_" & "'" & " " & Chr(38) & " " & Brack(strRowClass)
+            End If
+        Next j
+
+        If Len(rowTemp.strRHSFld) > 0 Then
+            strSQL = strSQL & "RHS, "
+        End If
+        If Len(rowTemp.strSense) > 0 Then
+            strSQL = strSQL & "SENSE, "
+        End If
+        strSQL = strSQL & rowTemp.strType & "Code, " & rowTemp.strType & "Desc )" & vbNewLine
+        strSQL = strSQL & "SELECT DISTINCT" & vbNewLine & "0 AS ID," & vbNewLine
+        strSQL = strSQL & strSelObj
+        If Len(rowTemp.strRHSFld) > 0 Then
+            strSQL = strSQL & rowTemp.strRecSet & "." & rowTemp.strRHSFld & " AS RHS, " & vbNewLine
+        End If
+        If Len(rowTemp.strSense) > 0 Then
+            strSQL = strSQL & "'" & rowTemp.strSense & "'" & " AS SENSE, " & vbNewLine
+        End If
+
+        strConstraintName = strConstraintName & " AS ConstraintName," & vbNewLine
+
+        strSQL = strSQL & strConstraintName & "Left(" & Brack(rowTemp.strRowDescFld) & "," & _miscParams.Item("LPM_TEXT_LENGTH").ToString() & ") AS ConstraintDesc" & vbNewLine
+
+        strSQL = strSQL & "FROM " & rowTemp.strRecSet & vbNewLine
+        strSQL = strSQL & ";"
+
+        Return strSQL
+
+    End Function
+
+    Private Function MatGen() As Boolean
+        '//================================================================================//
+        '/|   FUNCTION: MatGen
+        '/| PARAMETERS: -NONE-
+        '/|    RETURNS: True on Success and False by default or Failure
+        '/|    PURPOSE: Generate the Matrix by Populating LPM_MATRIX_TABLE_NAME using the
+        '/|             data from LPM_COLUMN_DEF_TABLE_NAME, LPM_CONSTR_DEF_TABLE_NAME,
+        '/|             and LPM_COEFFS_DEF_TABLE_NAME
+        '/|      USAGE: i= MatGen()
+        '/|         BY: Sean
+        '/|       DATE: 01/15/2004
+        '/|    HISTORY: 12/15/2003 Originally Written
+        '/|             01/15/2004 Originally Adapted to ADO
+        '//================================================================================//
+
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+        Dim rs As DataTable
+        Dim i As Integer, rowCount As Integer
+        Dim strINS As String, strSQL As String, s As String
+        Dim T As Date
+        Dim ctrRow As Integer, ctrCol As Integer, ctrMtx As Integer
+
+        Debug.Print("MatGen...")
+        EntLib.Log.Log("Status", "Entering MatGen...")
+
+        T = Now()
+
+        _lastSql = "SELECT * FROM " & _miscParams.Item("LPM_COEFFS_DEF_TABLE_NAME").ToString
+        rs = _currentDb.GetDataSet(_lastSql).Tables(0)
+
+        strINS = "INSERT INTO " & _miscParams!LPM_MATRIX_TABLE_NAME & vbNewLine & _
+                 "  ( ColID, RowID, COL, ROW, COEF )" & vbNewLine
+
+        '// C O E F F  L O O P  //
+        For i = 0 To rs.Rows.Count - 1
+            'strSQL = strINS & MakeMatGenQry2(rsClone!CoeffTypeID)
+            _matGenOK = True
+            strSQL = strINS & MakeMatGenQry2(rs.Rows(i).Item("CoeffTypeID").ToString)
+            If _matGenOK = True Then
+                s = rs.Rows(i).Item("CoeffTypeID").ToString & " " & rs.Rows(i).Item("colType").ToString & " " & rs.Rows(i).Item("rowType").ToString
+                Debug.Print(s)
+                EntLib.Log.Log("Status", "MatGen: " & s)
+                _lastSql = strSQL
+                EntLib.Log.Log("Status", "MatGen: " & _lastSql)
+                rowCount = _currentDb.ExecuteNonQuery(_lastSql)
+                s = "     ... " & EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount) 'Format(Now() - T, "hh:nn:ss")
+                Debug.Print(s)
+                EntLib.Log.Log("Status", "MatGen: " & s)
+            End If
+        Next
+
+        s = "MatGen....." & EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount)
+        Debug.Print(s)
+        EntLib.Log.Log("Status", "MatGen: " & s)
+
+        ctrCol = _currentDb.GetScalerValue("SELECT COUNT(*) FROM tsysCol")
+        ctrRow = _currentDb.GetScalerValue("SELECT COUNT(*) FROM tsysRow")
+        ctrMtx = _currentDb.GetScalerValue("SELECT COUNT(*) FROM tsysMtx")
+
+        EntLib.Log.Log("Status", "ColCt (tsysCol) = " & ctrCol.ToString())
+        EntLib.Log.Log("Status", "RowCt (tsysRow) = " & ctrRow.ToString())
+        EntLib.Log.Log("Status", "NZCt  (tsysMtx) = " & ctrMtx.ToString())
+
+        Debug.Print("ColCt (tsysCol) = " & ctrCol.ToString())
+        Debug.Print("RowCt (tsysRow) = " & ctrRow.ToString())
+        Debug.Print("NZCt  (tsysMtx) = " & ctrMtx.ToString())
+
+        Return True
+
+        'Debug.Print("ROWS:  " & mlElmCounter)
+        'EntLib.Log.Log("C-OPT Engine - PopElmTbls - ", "ROWS:  " & mlElmCounter)
+
+        EntLib.Log.Log("Status", "Exiting MatGen...")
+        EntLib.Log.Log("C-OPT Engine - MatGen took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+
+    End Function
+
+    Private Function MakeMatGenQry2(ByVal ID As Long) As String
+        '//================================================================================//
+        '/|   FUNCTION: MakeMatGenQry2
+        '/| PARAMETERS: lngCoeffID, ID from the Table LPM_COEFFS_DEF_TABLE_NAME
+        '/|    RETURNS: SQL on Success and False by default or Failure
+        '/|    PURPOSE: Create SQL for getting a set of matrix coefficients for a given
+        '/|             column type and row type.
+        '/|      USAGE: i= MakeMatGenQry2(23)
+        '/|         BY: Sean, Ravi
+        '/|       DATE: 01/14/2004
+        '/|    HISTORY: 3/15/97  Originally Written
+        '/|             3/17/97  Handle all 8 cases (Class in Col and/or Row and/or Qry)
+        '/|             3/26/97  Add Column ID and Row ID
+        '/|             4/11/97  Change Modularity based on Read, Make Qry, Execute
+        '/|                      also allow coeff recset to access tables as well as qry's
+        '/|             7/22/99  Change the join implementation from WHERE clauses to
+        '/|                      INNER JOIN syntax
+        '/|             11/8/99  Complete and test the previous change.  Get all 27 unique
+        '/|                      JOIN Combo Possibilites, translate to  the 11 general
+        '/|                      query structures
+        '/|             8/2/00
+        '/|             1/14/04  adapt to ADO
+        '/|             5/03/07  adapt to ADO.NET (C-OPT.net, C-OPT2)
+        '//================================================================================//
+
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+
+        Dim rowTemp As typRowType, colTemp As typColType
+        Dim coeffTemp As typCoeffType
+        Dim qdf As DataTable 'Object 'ADOX.Table   'QueryDef
+        Dim fld As DataColumn  'Object 'ADOX.column  'Field
+        'Dim tdf As Object 'ADOX.Table   'TableDef
+
+        Dim i As Integer, j As Integer, intCols As Integer, intRows As Integer
+        Dim intIgNull As Integer, intFirstWhere As Integer
+        'Dim intColClassStatus As Integer
+        Dim intLast As Integer, intDupe As Integer, intCountWhere As Integer
+        Dim intCountC2R As Integer, intCountC2Q As Integer, intCountR2Q As Integer
+        Dim intFirst3265Error As Integer, strQorT As String
+        Dim strColElTable As String, strRowElTable As String
+        Dim strColType As String, strRowType As String
+        Dim strQryName As String, strQryField As String, strSQL As String
+        Dim strColClass As String, strRowClass As String
+        Dim strClassIncCode As String, strClassName As String
+        Dim strC2Rcode As String, strC2Qcode As String, strR2Qcode As String
+        Dim strJoinComboType As String, intMatgenQryType As Integer
+        Dim sF00 As String, sF01 As String, sF02 As String, sF03 As String, sF04 As String, sF05 As String
+        Dim sJ1 As String, sJ2 As String, sJ3 As String, sC01 As String, sC02 As String, sC03 As String
+
+        Dim Classes(1, 1) As String
+
+        Debug.Print("MakeMatGenQry2...")
+        EntLib.Log.Log("Status", "Entering MakeMatGenQry2...")
+
+        intIgNull = False
+        intFirstWhere = True
+        intCountWhere = 0
+        intCountC2R = 0
+        intCountC2Q = 0
+        intCountR2Q = 0
+        intRows = 0
+        intLast = 0
+        strQorT = "Q"
+        strJoinComboType = ""
+        intFirst3265Error = True
+
+        coeffTemp = ReadCoeffType(ID)
+        colTemp = ReadColType(coeffTemp.lngColID)
+        rowTemp = ReadRowType(coeffTemp.lngRowID)
+
+        '// G E T  C O L   A N D   R O W   I N F O R M A T I O N  //
+        If colTemp.intActive * rowTemp.intActive * coeffTemp.intActive = 0 Then
+            _matGenOK = False
+            'MakeMatGenQry2 = "False"
+            Return "False"
+            'GoTo MakeMatGenQry2_Done
+        Else
+            '// Get Col Type
+            strColType = coeffTemp.strColType
+
+            '// Get Row Type
+            strRowType = coeffTemp.strRowType
+
+            'For i = 0 To moDAL.oCatalog.Tables.Count - 1           'debug TABLE LOOP
+            ' Debug.Print moDAL.oCatalog.Tables(i).Name
+            ' Log False, moDAL.oCatalog.Tables(i).Name
+            'Next i
+
+            strQryName = Brack(coeffTemp.strRecSet)                              '// Get Query Name
+            strQryField = Brack(coeffTemp.strCoeffFld)                           '// Get Query's Field Name
+            strColElTable = Brack(_miscParams.Item("LPM_COL_ELEMENT_TABLE_PRE").ToString _
+                              & colTemp.strTable)                                '// Get Col Element Table Name
+            strRowElTable = Brack(_miscParams.Item("LPM_ROW_ELEMENT_TABLE_PRE").ToString _
+                              & rowTemp.strTable)                                '// Get Row Element Table Name
+
+            'strQryName = "SELECT TOP 1 * FROM " & strQryName
+            'qdf = moDAL.oCatalog.Tables(UnBrack(strQryName))                 '// Open the QueryDef Object
+            'qdf = _currentDb.GetDataSet(strQryName).Tables(0)
+            qdf = _currentDb.GetDataSet("SELECT TOP 1 * FROM " & strQryName).Tables(0)
+            intCols = colTemp.intClassCount
+            intRows = rowTemp.intClassCount
+
+            ReDim Classes(intCols + intRows, 4)    '// 4 column array:  ClassName, Col?, Row?, Qry?
+
+            '// Initialize the Class Array with all 'N'
+            For i = 1 To intCols + intRows
+                Classes(i, 2) = "N"
+                Classes(i, 3) = "N"
+                Classes(i, 4) = "N"
+            Next i
+
+            '// Fill Array with the Column Classes
+            For i = 1 To intCols
+                strColClass = UCase(colTemp.strClasses(i))
+                Classes(i, 1) = strColClass
+                Classes(i, 2) = "Y"                 '// Put a 'Y' in the 2 column (Col?) of the array
+                intLast = i
+            Next i
+
+            '// Search Rows for Classes
+            For j = 1 To intRows
+                strRowClass = UCase(rowTemp.strClasses(j))
+                intDupe = False
+                For i = 1 To intCols
+                    strColClass = colTemp.strClasses(i)
+                    If strRowClass = strColClass Then   '// If it is also a Column Class Then
+                        intDupe = True                   '// It's a duplicate
+                        Classes(i, 3) = "Y"              '// Put a 'Y' in the 3 column (Row?) of the array
+                    End If
+                Next i
+
+                If Not intDupe Then                          '// If this Row class is a new class Then
+                    Classes(intLast + 1, 1) = strRowClass     '// Add it to the array
+                    Classes(intLast + 1, 3) = "Y"             '// Put a 'Y' in the 3 column (Row?) of the array
+                    intLast = intLast + 1
+                End If
+            Next j
+
+
+            Select Case strQorT
+
+                Case "Q"
+                    '// Search The Query for Classes
+                    For i = 1 To intCols + intRows
+                        For Each fld In qdf.Columns
+                            If Classes(i, 1) = UCase(fld.Caption) Then
+                                Classes(i, 4) = "Y"                       '// Put a 'Y' in the 4 column (Qry?) of the array
+                            End If
+                        Next
+                    Next i
+
+                Case "ELSE" ' ONLY FOR ACCESS ONLY, SINCE ADO THIS IS NOT NEEDED.
+                    '// Search The Table for Classes
+                    'For i = 1 To intCols + intRows
+                    '    For Each fld In tdf.Columns
+                    '        If Classes(i, 1) = UCase(fld.Caption) Then
+                    '            Classes(i, 4) = "Y"                       '// Put a 'Y' in the 4 column (Qry?) of the array
+                    '        End If
+                    '    Next
+                    'Next i
+
+            End Select
+
+            '// Build the SQL statement (SELECT)
+
+            strSQL = ""
+            strSQL = "SELECT DISTINCT" & vbNewLine       '// Select Distinct {Changed from DISTINCTROW 11/7/03  --STM}
+
+            '// Field arguments to the Select Statement
+            strSQL = strSQL & strColElTable & "." & strColType & "ID AS [CID]," & vbNewLine
+            strSQL = strSQL & strRowElTable & "." & strRowType & "ID AS [RID]," & vbNewLine
+            strSQL = strSQL & strColElTable & "." & strColType & "Code AS [COLUMN]," & vbNewLine
+            strSQL = strSQL & strRowElTable & "." & strRowType & "Code AS [ROW]," & vbNewLine
+            strSQL = strSQL & strQryName & "." & strQryField & " AS [COEF]" & vbNewLine
+
+            intIgNull = True                             '// Set to ignore nulls in the following loops
+
+            For i = 1 To intCols + intRows
+                strClassIncCode = Classes(i, 2) & Classes(i, 3) & Classes(i, 4)
+                Select Case strClassIncCode
+                    Case "YYY"     '// Class is in Column, Row, and Query
+                        intCountWhere = intCountWhere + 2
+                        intCountC2R = intCountC2R + 1
+                        intCountC2Q = intCountC2Q + 1
+                    Case "YYN"     '// Class is in Column and Row but not the Query
+                        intCountWhere = intCountWhere + 1
+                        intCountC2R = intCountC2R + 1
+                    Case "YNY"     '// Class is in Column and Query
+                        intCountWhere = intCountWhere + 1
+                        intCountC2Q = intCountC2Q + 1
+                    Case "NYY"     '// Class is in Row and Query
+                        intCountWhere = intCountWhere + 1
+                        intCountR2Q = intCountR2Q + 1
+                End Select
+            Next i
+
+
+            '// Change all the counts that are greater than one to "2" and convert the rest to strings
+            If intCountC2R >= 2 Then
+                strC2Rcode = "2"
+            Else
+                strC2Rcode = CStr(intCountC2R)
+            End If
+
+            If intCountC2Q >= 2 Then
+                strC2Qcode = "2"
+            Else
+                strC2Qcode = CStr(intCountC2Q)
+            End If
+
+            If intCountR2Q >= 2 Then
+                strR2Qcode = "2"
+            Else
+                strR2Qcode = CStr(intCountR2Q)
+            End If
+
+            strJoinComboType = strC2Rcode & strC2Qcode & strR2Qcode
+
+
+            '// convert the join combo type (27 unique possibilities) to one of the 11 (0-10) types of generic block queries
+            Select Case strJoinComboType
+                Case "000"
+                    intMatgenQryType = 0
+                Case "010", "020"
+                    intMatgenQryType = 1
+                Case "001", "002"
+                    intMatgenQryType = 2
+                Case "100", "200"
+                    intMatgenQryType = 3
+                Case "110", "120"
+                    intMatgenQryType = 4
+                Case "101", "102"
+                    intMatgenQryType = 5
+                Case "111", "122", "121", "112", "211", "222", "221", "212"
+                    intMatgenQryType = 6
+                Case "210", "220"
+                    intMatgenQryType = 7
+                Case "201"
+                    intMatgenQryType = 8
+                Case "011", "022", "021", "012"
+                    intMatgenQryType = 9
+                Case "202"
+                    intMatgenQryType = 10
+            End Select
+
+
+
+
+            '// The Beginning of the FROM clause
+            '===================================================================
+            sF00 = "FROM " & strColElTable & ", " & strRowElTable & ", " & strQryName & vbNewLine
+            sF01 = "FROM " & strRowElTable & ", " & strColElTable & vbNewLine
+            sF02 = "FROM " & strColElTable & ", " & strRowElTable & vbNewLine
+            sF03 = "FROM " & strColElTable & vbNewLine
+            sF04 = "FROM " & strQryName & ", " & strColElTable & vbNewLine
+            sF05 = "FROM (" & strColElTable & vbNewLine
+
+            '// The INNER JOIN clauses
+            '===================================================================
+            sJ1 = "INNER JOIN " & strQryName & " ON" & vbNewLine
+            sJ2 = "INNER JOIN (" & strRowElTable & vbNewLine
+            sJ3 = "INNER JOIN " & strRowElTable & " ON" & vbNewLine
+
+            sC01 = ""
+            sC02 = ""
+            sC03 = ""
+
+            '// The Field Joins
+            '===================================================================
+
+            '// Column to Row (aka C2R and C01)
+            '===================================
+            intFirstWhere = True
+            If intCountC2R > 0 Then
+
+                '// "WHERE" Statements
+                'sC01 = sC01 & "(" & vbNewLine
+
+                For i = 1 To intCols + intRows
+                    strClassIncCode = Classes(i, 2) & Classes(i, 3) & Classes(i, 4)
+                    strClassName = Classes(i, 1)
+                    If Not intFirstWhere And Len(Classes(i, 1)) > 0 Then
+                        If Not ((strClassIncCode = "YNN") Or (strClassIncCode = "NYN")) Then    '//Class is in more than one place
+                            If Not ((strClassIncCode = "YNY") Or (strClassIncCode = "NYY")) Then '//Class is not in the C2R join
+                                sC01 = sC01 & "AND" & vbNewLine       '// Add 'AND' to the SQL if it's not the first Where Statement
+                            End If
+                        End If
+                    End If
+                    Select Case strClassIncCode
+                        Case "YYY"     '// Class is in Column, Row, and Query
+                            sC01 = sC01 & "(" & strColElTable & "." & strClassName & " = " & strRowElTable & "." & strClassName & ")" & vbNewLine
+                            intFirstWhere = False
+                        Case "YYN"     '// Class is in Column and Row but not the Query
+                            sC01 = sC01 & "(" & strColElTable & "." & strClassName & " = " & strRowElTable & "." & strClassName & ")" & vbNewLine
+                            intFirstWhere = False
+                        Case Else
+                    End Select
+                Next i
+
+                '// Close the WHERE Statement
+                'sC01 = sC01 & vbNewLine & ")" & vbNewLine
+
+            End If
+
+
+            '// Column to Qry (aka C2Q and C02)
+            '===================================
+            intFirstWhere = True
+            If intCountC2Q > 0 Then
+
+                '// "WHERE" Statements
+
+                For i = 1 To intCols + intRows
+                    strClassIncCode = Classes(i, 2) & Classes(i, 3) & Classes(i, 4)
+                    strClassName = Classes(i, 1)
+                    If Not intFirstWhere And Len(Classes(i, 1)) > 0 Then
+                        If Not ((strClassIncCode = "YNN") Or (strClassIncCode = "NYN")) Then    '//Class is in more than one place
+                            If Not ((strClassIncCode = "YYN") Or (strClassIncCode = "NYY")) Then '//Class is not in the C2Q join
+                                sC02 = sC02 & "AND" & vbNewLine       '// Add 'AND' to the SQL if it's not the first Where Statement
+                            End If
+                        End If
+                    End If
+                    Select Case strClassIncCode
+                        Case "YYY"     '// Class is in Column, Row, and Query
+                            sC02 = sC02 & "(" & strColElTable & "." & strClassName & " = " & strQryName & "." & strClassName & ")" & vbNewLine
+                            intFirstWhere = False
+                        Case "YNY"     '// Class is in Column and Query
+                            sC02 = sC02 & "(" & strColElTable & "." & strClassName & " = " & strQryName & "." & strClassName & ")" & vbNewLine
+                            intFirstWhere = False
+                        Case Else
+                    End Select
+                Next i
+
+                '// Close the WHERE Statement
+
+            End If
+
+
+            '// Row to Qry (aka R2Q and C03)
+            '===================================
+            intFirstWhere = True
+            If intCountR2Q > 0 Then
+
+                '// "WHERE" Statements
+
+                For i = 1 To intCols + intRows
+                    strClassIncCode = Classes(i, 2) & Classes(i, 3) & Classes(i, 4)
+                    strClassName = Classes(i, 1)
+                    If Not intFirstWhere And Len(Classes(i, 1)) > 0 Then
+                        If Not ((strClassIncCode = "YNN") Or (strClassIncCode = "NYN")) Then    '//Class is in more than one place
+                            If Not ((strClassIncCode = "YYY") Or (strClassIncCode = "YYN") Or (strClassIncCode = "YNY")) Then '//Class is not in the R2Q join
+                                sC03 = sC03 & "AND" & vbNewLine       '// Add 'AND' to the SQL if it's not the first Where Statement
+                            End If
+                        End If
+                    End If
+                    Select Case strClassIncCode
+                        Case "NYY"     '// Class is in Row and Query
+                            sC03 = sC03 & "(" & strRowElTable & "." & strClassName & " = " & strQryName & "." & strClassName & ")" & vbNewLine
+                            intFirstWhere = False
+                        Case Else
+                    End Select
+                Next i
+
+            End If
+
+            Select Case intMatgenQryType     '// note that case 7 and case 4 are the same
+                '//                8 and      5 too
+                Case 0
+                    strSQL = strSQL & sF00 & ";"
+                Case 1
+                    strSQL = strSQL & sF01 & sJ1 & sC02 & ";"
+                Case 2
+                    strSQL = strSQL & sF02 & sJ1 & sC03 & ";"
+                Case 3
+                    strSQL = strSQL & sF04 & sJ3 & sC01 & ";"
+                Case 4
+                    strSQL = strSQL & sF05 & sJ3 & sC01 & ") " & vbNewLine & sJ1 & sC02 & ";"
+                Case 5
+                    strSQL = strSQL & sF05 & sJ3 & sC01 & ") " & vbNewLine & sJ1 & sC03 & ";"
+                Case 6
+                    strSQL = strSQL & sF05 & sJ3 & sC01 & ") " & vbNewLine & sJ1 & sC02 & " AND " & vbNewLine & sC03 & ";"
+                Case 7
+                    strSQL = strSQL & sF05 & sJ3 & sC01 & ") " & vbNewLine & sJ1 & sC02 & ";"
+                Case 8
+                    strSQL = strSQL & sF05 & sJ3 & sC01 & ") " & vbNewLine & sJ1 & sC03 & ";"
+                Case 9
+                    strSQL = strSQL & sF03 & sJ2 & vbNewLine & sJ1 & sC03 & ") ON" & vbNewLine & sC02 & ";"
+                Case 10
+                    strSQL = strSQL & sF03 & sJ2 & vbNewLine & sJ1 & sC03 & ") ON" & vbNewLine & sC01 & ";"
+            End Select
+
+            Return strSQL
+        End If
+
+        EntLib.Log.Log("Status", "Exiting MakeMatGenQry2...")
+        EntLib.Log.Log("C-OPT Engine - MakeMatGenQry2 took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+    End Function
+
+    Private Function ReadCoeffType(ByVal ID As Long) As typCoeffType
+        '//================================================================================//
+        '/|   FUNCTION: ReadCoeffType
+        '/| PARAMETERS: ID, the CoeffTypeID from table LPM_COEFFS_DEF_TABLE_NAME
+        '/|    RETURNS: CoeffType data variable of form:
+        '/|
+        '/|                lngID        As Long
+        '/|                intActive    As Integer
+        '/|                strType      As String
+        '/|                strColType   As String
+        '/|                lngColID     As Long
+        '/|                strRowType   As String
+        '/|                lngRowID     As Long
+        '/|                strRecSet    As String
+        '/|                strCoeffFld  As String
+        '/|
+        '/|    PURPOSE: Read in all the information associated with a Coeff type
+        '/|      USAGE: CoeffTemp = ReadCoeffType(7)
+        '/|         BY: Sean
+        '/|       DATE: 01/07/2004
+        '/|    HISTORY:  3/31/97
+        '//================================================================================//
+        Dim startTime As Integer = My.Computer.Clock.TickCount
+
+        Dim rs As DataTable, rsCol As DataTable, rsRow As DataTable
+        Dim i As Integer, colCtr As Integer, rowCtr As Integer
+        Dim coeffTemp As typCoeffType
+        'Dim strClassConcat As String
+
+        Debug.Print("ReadCoeffType...")
+        EntLib.Log.Log("Status", "Entering ReadCoeffType...")
+
+        '// Open the Coeff Definition Table
+        _lastSql = "SELECT * FROM " & _miscParams!LPM_COEFFS_DEF_TABLE_NAME
+        rs = _currentDb.GetDataSet(_lastSql).Tables(0)
+
+        _lastSql = "SELECT * FROM " & _miscParams!LPM_COLUMN_DEF_TABLE_NAME
+        rsCol = _currentDb.GetDataSet(_lastSql).Tables(0)
+
+        _lastSql = "SELECT * FROM " & _miscParams!LPM_CONSTR_DEF_TABLE_NAME
+        rsRow = _currentDb.GetDataSet(_lastSql).Tables(0)
+
+        For i = 0 To rs.Rows.Count - 1
+            If rs.Rows(i).Item("CoeffTypeID").ToString = ID Then
+                coeffTemp.lngID = rs.Rows(i).Item("CoeffTypeID").ToString
+                coeffTemp.intActive = rs.Rows(i).Item("CoeffActive")
+                coeffTemp.strType = rs.Rows(i).Item("CoeffType").ToString
+                coeffTemp.strColType = rs.Rows(i).Item("colType").ToString
+
+                '// Get the ColTypeID
+                For colCtr = 0 To rsCol.Rows.Count - 1 '// Find the Correct Col Type
+                    'If rsCol!colType = coeffTemp.strColType Then    '// Read the Col ID
+                    If rsCol.Rows(colCtr).Item("colType").ToString = coeffTemp.strColType Then '// Read the Col ID
+                        coeffTemp.lngColID = rsCol.Rows(colCtr).Item("ColTypeID").ToString  '!ColTypeID
+                        Exit For
+                    End If
+                Next
+
+                coeffTemp.strRowType = rs.Rows(i).Item("rowType").ToString
+
+                '// Get the RowTypeID
+                'Do While rsRow.EOF = False                         '// Find the Correct Row Type
+                '    If rsRow!rowType = coeffTemp.strRowType Then    '// Read the Row ID
+                '        coeffTemp.lngRowID = rsRow!RowTypeID
+                '        Exit Do
+                '    End If
+                '    rsRow.MoveNext()
+                'Loop
+                For rowCtr = 0 To rsRow.Rows.Count - 1 '// Find the Correct Row Type
+                    'If rsCol!colType = coeffTemp.strColType Then    '// Read the Col ID
+                    If rsRow.Rows(rowCtr).Item("rowType").ToString = coeffTemp.strRowType Then '// Read the Row ID
+                        coeffTemp.lngRowID = rsRow.Rows(rowCtr).Item("RowTypeID").ToString  '!RowTypeID
+                        Exit For
+                    End If
+                Next
+
+                coeffTemp.strRecSet = rs.Rows(i).Item("CoeffRecSet") 'rs!CoeffRecSet
+                coeffTemp.strCoeffFld = rs.Rows(i).Item("CoeffField") 'rs!CoeffField
+                Exit For
+
+            End If
+        Next
+
+        'MsgBox(coeffTemp.strRowType)
+
+        Return coeffTemp
+
+        EntLib.Log.Log("Status", "Exiting ReadCoeffType...")
+        EntLib.Log.Log("C-OPT Engine - ReadCoeffType took: ", EntLib.GenUtils.FormatTime(startTime, My.Computer.Clock.TickCount))
+    End Function
+
+    Private Sub Solve()
+
+        Dim success As Boolean
+        'Dim dsRCC As New DataSet()
+
+        Dim dtCol As New DataTable()
+        Dim dtRow As New DataTable()
+        Dim dtMtx As New DataTable()
+
+        dtCol = _currentDb.GetDataTable("SELECT * FROM tsysCOL")                    'SESSIONIZE
+        dtRow = _currentDb.GetDataTable("SELECT * FROM tsysROW")                    'SESSIONIZE
+        dtMtx = _currentDb.GetDataTable("SELECT * FROM qsysMTXwithCOLS")            'SESSIONIZE
+
+        'dsRCC.Tables.Add(dtCol)
+        'dsRCC.Tables(0).TableName = "tsysCOL"
+        'dsRCC.Tables.Add(dtRow)
+        'dsRCC.Tables(1).TableName = "tsysROW"
+        'dsRCC.Tables.Add(dtMtx)
+        'dsRCC.Tables(2).TableName = "qsysMTXwithCOLS"
+
+        'Dim mps As Solver = New Solver( _
+        '    _miscParams, _
+        '    My.Application.Info.DirectoryPath & "\" & "ModelName" & "___" & "ProblemName" & ".MPS", _
+        '    "ModelName", "ProblemName", 1, "PROFIT", _
+        '    _miscParams.Item("LPM_CONSTR_TABLE_NAME").ToString(), _
+        '    _miscParams.Item("LPM_COLUMN_TABLE_NAME").ToString(), _
+        '    "qsysMTXwithCOLS", 48, _
+        '    dtRow.Rows.Count, _
+        '    dtCol.Rows.Count, _
+        '    dtMtx.Rows.Count, _
+        '    0, _
+        '    0, _
+        '    "N/A", _
+        '    "N/A", _
+        '    "Sean MacDermant/Ravi Poluri [International Paper]", _
+        '    "C-OPT2", _
+        '    "Basic Mill:Machine Prod Planning LP Model" _
+        ')
+
+        'success = mps.mpslpOutputMPS(dsRCC)
+
+        'mps.RunGLPKSolver()
+
+        'EntLib.Log.Log("Status", "MPS file was successfully generated.")
+
+        'Dim xa As Solver_XA = New Solver_XA
+        'success = xa.Solve(dtRow, dtCol, dtMtx)
+
+        Dim xa As Solver_XA = New Solver_XA
+        success = xa.Solve(dtRow, dtCol, dtMtx, _lpProbInfo)
+        'success = xa.Solve(dtRow, dtCol, dtMtx, lpProbInfo)
+        'success = xa.Solve(dtRow, dtCol, dtMtx)
+
+
+    End Sub
+
+    Private Sub PostSolve()
+
+    End Sub
+
+    Private Function UnBrack(ByVal strIn As String) As String
+
+        If (Left(strIn, 1) = "[") Then
+            strIn = Right(strIn, Len(strIn) - 1)
+        End If
+
+        If (Right(strIn, 1) = "]") Then
+            strIn = Left(strIn, Len(strIn) - 1)
+        End If
+
+        Return strIn
+
+    End Function
+
+    Public Sub SaveMatrix()
+        Dim ds As New DataSet
+        Dim tableName As String
+        Dim outputFile As String
+
+        tableName = "tsysRow"
+        outputFile = My.Application.Info.DirectoryPath & "\" & tableName & ".xml"
+        _currentDb.GetDataSet("SELECT * FROM " & tableName).WriteXml(outputFile, XmlWriteMode.WriteSchema)
+
+        tableName = "tsysCol"
+        outputFile = My.Application.Info.DirectoryPath & "\" & tableName & ".xml"
+        _currentDb.GetDataSet("SELECT * FROM " & tableName).WriteXml(outputFile, XmlWriteMode.WriteSchema)
+
+        tableName = "tsysMtx"
+        outputFile = My.Application.Info.DirectoryPath & "\" & tableName & ".xml"
+        _currentDb.GetDataSet("SELECT * FROM " & tableName).WriteXml(outputFile, XmlWriteMode.WriteSchema)
+    End Sub
+
+    Private Function GetDefColQueries() As DataTable
+        Return _currentDb.GetDataTable("SELECT 'COL' AS DefType, ColTypeRecSet AS SourceQuery FROM tsysDefCol")
+    End Function
+
+    Private Function GetDefRowQueries() As DataTable
+        Return _currentDb.GetDataTable("SELECT 'ROW' AS DefType, RowTypeRecSet AS SourceQuery FROM tsysDefRow")
+    End Function
+
+    Private Function GetDefCoeffQueries() As DataTable
+        Return _currentDb.GetDataTable("SELECT 'COEFF' AS DefType, CoeffRecSet AS SourceQuery FROM tsysDefCoef")
+    End Function
+
+    Private Function GetDefQueries() As DataTable
+        Dim defTable As DataTable
+
+        defTable = GetDefColQueries()
+        defTable.Merge(GetDefRowQueries())
+        defTable.Merge(GetDefCoeffQueries())
+
+        Return defTable
+    End Function
+
+    Public Function CurrentDb() As EntLib.DAAB
+        Return _currentDb
+    End Function
+End Class

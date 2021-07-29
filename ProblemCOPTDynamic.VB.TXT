@@ -1,0 +1,420 @@
+Imports System.Text
+Imports CoinMPTestVB8.Coin.CoinMP
+Imports System.Linq
+Imports System.Xml.Linq
+Imports System.Data.Linq
+Imports System.Linq.Expressions
+
+Namespace CoinMPTest
+
+    Module ProblemCOPTDynamic
+        Private _ds As New DataSet
+
+        Public Sub Solve(ByVal solveProblem As SolveProblem)
+            Const NUM_COLS As Integer = 33
+            Const NUM_ROWS As Integer = 28
+            Const NUM_NZ As Integer = 85
+            Const NUM_RNG As Integer = 0
+            Const INF As Double = 1.0E+37
+
+            Dim probname As String = "Afiro"
+            Dim ncol As Integer = NUM_COLS
+            Dim nrow As Integer = NUM_ROWS
+            Dim nels As Integer = NUM_NZ
+            Dim nrng As Integer = NUM_RNG
+
+            Dim objectname As String = "Cost"
+            Dim objsens As Integer = CoinMP.ObjectSense.Min
+            Dim objconst As Double = 0.0
+
+            Dim ctr As Short
+
+            'Dim matbeg() As Integer
+            'Dim matcount() As Integer
+            'Dim matindex() As Integer
+            'Dim matvalue() As Double
+            'Dim colNames() As String
+            'Dim rowNames() As String
+
+            db_Connect()
+
+
+            'ROWSLIST
+            '===============================================================================
+            Dim dtTempRow = _ds.Tables("ROWSLIST").AsEnumerable()
+
+            'LOAD ARRAY:  rowNames
+            Dim tempvals = From dbl In dtTempRow _
+                           Order By dbl!ZeroBaseRowIndex _
+                           Select dbl("ROW")
+            Dim rowNames = tempvals.ToArray().Cast(Of String)()
+
+            'LOAD ARRAY:  rowTYPE
+            tempvals = Nothing
+            tempvals = From dbl In dtTempRow _
+                           Order By dbl!ZeroBaseRowIndex _
+                           Select dbl("SENSE")
+            Dim rowtype = tempvals.ToArray().Cast(Of Char)()
+
+            'LOAD ARRAY:  dRHS
+            tempvals = Nothing
+            tempvals = From dbl In dtTempRow _
+                           Order By dbl!ZeroBaseRowIndex _
+                           Select dbl("RHS")
+            Dim drhs = tempvals.ToArray().Cast(Of Double)()
+
+
+
+            'MATRIX
+            '===============================================================================
+            Dim dtTemp = _ds.Tables("MATRIX").AsEnumerable()
+
+            'LOAD ARRAY:  dobj
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Where dbl!IsFirstRecordOfCOL <> 0 _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("OBJ")
+            Dim dobj = tempvals.ToArray().Cast(Of Double)()
+
+            'LOAD ARRAY:  dlo
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Where dbl!IsFirstRecordOfCOL <> 0 _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("LO")
+            Dim dlo = tempvals.ToArray().Cast(Of Double)()
+
+            'LOAD ARRAY:  dup
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Where dbl!IsFirstRecordOfCOL <> 0 _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("UP")
+            Dim dup = tempvals.ToArray().Cast(Of Double)()
+
+            'LOAD ARRAY:  colNames
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Where dbl!IsFirstRecordOfCOL <> 0 _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("COL")
+            Dim colNames = tempvals.ToArray().Cast(Of String)()
+
+            'LOAD ARRAY:  matBEG
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Where dbl!IsFirstRecordOfCOL <> 0 _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("matBEG")
+            Dim matbeg = tempvals.ToArray().Cast(Of Integer)()
+
+            'LOAD ARRAY:  matCOUNT
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Where dbl!IsFirstRecordOfCOL <> 0 _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("matCOUNT")
+            Dim matcount = tempvals.ToArray().Cast(Of Integer)()
+
+            'LOAD ARRAY:  matINDEX
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("matINDEX")
+            Dim matindex = tempvals.ToArray().Cast(Of Integer)()
+
+            'LOAD ARRAY:  matVALUE
+            tempvals = Nothing
+            tempvals = From dbl In dtTemp _
+                           Order By dbl!ZeroBaseLineNumber, dbl!ZeroBaseColIndex, dbl!ZeroBaseRowIndex _
+                           Select dbl("matVALUE")
+            Dim matvalue = tempvals.ToArray().Cast(Of Double)()
+
+
+            ''OBJ Function
+            ''Coefficient of each variable in objective function
+            ''                       x1  x2
+            'Dim dobj() As Double = {0, -0.4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.32, 0, 0, 0, -0.6, _
+            '                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.48, 0, 0, 10} '-> 32
+
+            ''Lower limit of each variable in objective function
+            'Dim dclo() As Double = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, _
+            '                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} '-> 32
+
+            ''Upper limit of each variable in objective function
+            ''Note:
+            ''There are 42 entries in this array, which may be incorrect. 32 should be the correct number.
+            'Dim dcup() As Double = {INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, _
+            '        INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, _
+            '        INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF, INF} '-> 42
+
+            ''Equality of each constraint row
+            'Dim rtyp() As Char = "EELLEELLLLEELLEELLLLLLLLLLL" '-> 27
+
+            ''RHS value of each constraint row
+            'Dim drhs() As Double = {0, 0, 80, 0, 0, 0, 80, 0, 0, 0, 0, 0, 500, 0, 0, 44, 500, 0, _
+            '                        0, 0, 0, 0, 0, 0, 0, 310, 300} '-> 27
+
+            ''Cumulative total of number of occurances of each variable
+            ''Note:
+            ''This is a 0-based array
+            'Dim mbeg() As Integer = {0, 4, 6, 8, 10, 14, 18, 22, 26, 28, 30, 32, 34, 36, 38, 40, _
+            '                 44, 46, 48, 50, 52, 56, 60, 64, 68, 70, 72, 74, 76, 78, 80, 82, 83} '-> 33
+
+            ''Number of coefficients for each variable
+            'Dim mcnt() As Integer = {4, 2, 2, 2, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 2, 4, 2, 2, 2, 2, 4, _
+            '                         4, 4, 4, 2, 2, 2, 2, 2, 2, 2, 1} '-> 32
+
+            ''Ordinal position of each variable in the rows/constraints
+            ''Note:
+            ''This is a 0-based array
+            ''The first four (0,1,2,23) are positions of the variable x1 in rows (c1,c2,c3,c24).
+            'Dim midx() As Integer = {0, 1, 2, 23, 0, 3, 0, 21, 1, 25, 4, 5, 6, 24, 4, 5, 7, 24, 4, 5, _
+            '            8, 24, 4, 5, 9, 24, 6, 20, 7, 20, 8, 20, 9, 20, 3, 4, 4, 22, 5, 26, 10, 11, _
+            '            12, 21, 10, 13, 10, 23, 10, 20, 11, 25, 14, 15, 16, 22, 14, 15, 17, 22, 14, _
+            '            15, 18, 22, 14, 15, 19, 22, 16, 20, 17, 20, 18, 20, 19, 20, 13, 15, 15, 24, _
+            '            14, 26, 15} '-> 83
+
+            ''Coefficient value of each variable as defined by colNames
+            'Dim mval() As Double = {-1, -1.06, 1, 0.301, 1, -1, 1, -1, 1, 1, -1, -1.06, 1, 0.301, _
+            '        -1, -1.06, 1, 0.313, -1, -0.96, 1, 0.313, -1, -0.86, 1, 0.326, -1, 2.364, -1, _
+            '        2.386, -1, 2.408, -1, 2.429, 1.4, 1, 1, -1, 1, 1, -1, -0.43, 1, 0.109, 1, -1, _
+            '        1, -1, 1, -1, 1, 1, -0.43, 1, 1, 0.109, -0.43, 1, 1, 0.108, -0.39, 1, 1, _
+            '        0.108, -0.37, 1, 1, 0.107, -1, 2.191, -1, 2.219, -1, 2.249, -1, 2.279, 1.4, _
+            '        -1, 1, -1, 1, 1, 1} '-> 83
+
+            ''Column names
+            'Dim colNames() As String = {"x01", "x02", "x03", "x04", "x06", "x07", "x08", "x09", _
+            '        "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x22", "x23", "x24", "x25", _
+            '        "x26", "x28", "x29", "x30", "x31", "x32", "x33", "x34", "x35", "x36", "x37", _
+            '        "x38", "x39"} '-> 32
+
+            ''Row names
+            'Dim rowNames() As String = {"r09", "r10", "x05", "x21", "r12", "r13", "x17", "x18", _
+            '        "x19", "x20", "r19", "r20", "x27", "x44", "r22", "r23", "x40", "x41", "x42", _
+            '        "x43", "x45", "x46", "x47", "x48", "x49", "x50", "x51"} '-> 27
+
+            Dim optimalValue As Double = -464.753142857
+
+            solveProblem.Run(probname, optimalValue, ncol, nrow, nels, nrng, objsens, objconst, _
+                dobj, dlo, dup, rowtype, drhs, Nothing, matbeg, matcount, matindex, matvalue, _
+                colNames, rowNames, objectname, Nothing, Nothing)
+        End Sub
+
+        Public Sub db_Connect()
+            Dim starttime As Integer = My.Computer.Clock.TickCount
+            Dim con As System.Data.OleDb.OleDbConnection
+            Dim adapter As System.Data.OleDb.OleDbDataAdapter
+            Dim sql As String
+            Dim sCOL As String, sLastCOL
+            Dim i As Long
+            Dim j As Long
+            Dim iCurRowIndex As Long
+            Dim iLoopCount As Long
+            Dim iSQLCount As Long
+            Dim ival As Long
+            Dim ivalLast As Long
+            Dim iColCount As Long
+            Dim iPositionForMatCount As Long
+            Dim iCountCoeffsInCOL As Long
+            Dim conStr As String = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=C:\OPTMODELS\Afiro\Afiro.MDB;;" & _
+                                   "Jet OLEDB:System Database=C:\OPTMODELS\C-OPTSYS\System.MDW.COPT;" & _
+                                   "User ID=Admin;Password="
+            Dim dt As New DataTable()
+            con = New OleDb.OleDbConnection(conStr)
+
+            Try
+                con.Open()
+            Catch ex As Exception
+                MsgBox(ex.Message, MsgBoxStyle.Exclamation)
+            End Try
+
+
+            'SAMPLE ADO.NET VB CODE
+            'Dim dt = ds.Tables("Article")
+            'dt.Rows(2)("lines") = 700
+            'da.Update(ds, "Article")
+            'ds.AcceptChanges()
+
+
+            iLoopCount = 0
+            iSQLCount = 0
+            iPositionForMatCount = 0
+            iCountCoeffsInCOL = 0
+
+            sql = "SELECT * FROM tsysCol"
+            adapter = New OleDb.OleDbDataAdapter(sql, conStr)
+            adapter.Fill(dt)
+            _ds.Tables.Add(dt)
+            _ds.Tables(0).TableName = "COLUMNS"
+            '...
+            dt.WriteXml("C:\TEMP\" & "COLUMNS-" & Microsoft.VisualBasic.Format(Now(), "yyyymmdd-hhmm") & ".xml")
+            dt = Nothing
+
+
+            'ROWSLIST
+            '========
+            sql = "SELECT 0 AS ZeroBaseRowIndex, " & vbNewLine & _
+                  "       tsysROW.RowID, " & vbNewLine & _
+                  "       tsysMTX.ROW, " & vbNewLine & _
+                  "       First(tsysCOL.ColID) AS FirstColID, " & vbNewLine & _
+                  "       First(tsysMTX.COL) AS FirstCOL, " & vbNewLine & _
+                  "       First(tsysMTX.COEF) AS FirstCOEF, " & vbNewLine & _
+                  "       tsysROW.RHS, " & vbNewLine & _
+                  "       tsysROW.SENSE " & vbNewLine & _
+                  "FROM  " & _
+                  "      (tsysCOL INNER JOIN tsysMTX ON tsysCOL.ColID = tsysMTX.ColID)  " & vbNewLine & _
+                  "               INNER JOIN tsysROW ON tsysMTX.RowID = tsysROW.RowID " & vbNewLine & _
+                  "GROUP BY 0, tsysROW.RowID, tsysMTX.ROW, tsysROW.RHS, tsysROW.SENSE " & vbNewLine & _
+                  "ORDER BY tsysROW.RowID, First(tsysCOL.ColID); "
+            'sql = _
+            '    <Query>
+            '        SELECT DISTINCT a.ColID, b.RowCount 
+            '        FROM 
+            '            tsysMTX a 
+            '        INNER JOIN
+            '        (
+            '            SELECT DISTINCT COL, COUNT(ColID) AS RowCount FROM tsysMTX GROUP BY COL
+            '        ) b
+            '        ON 
+            '            a.COL = b.COL
+            '        ORDER BY
+            '            a.ColID
+            '    </Query>.Value
+
+            adapter = New OleDb.OleDbDataAdapter(sql, conStr)
+            dt = New DataTable
+            adapter.Fill(dt)
+            _ds.Tables.Add(dt)
+            _ds.Tables(1).TableName = "ROWSLIST"
+
+                    '--------------------------------------------
+            For i = 0 To CShort(dt.Rows.Count - 1)
+                        'Walk the table line by line and index the rows
+                dt.Rows(i).Item("ZeroBaseRowIndex") = i
+                iLoopCount = iLoopCount + 1
+            Next
+                    '--------------------------------------------
+            dt.WriteXml("C:\TEMP\" & "ROWSLIST-" & Microsoft.VisualBasic.Format(Now(), "yyyymmdd-hhmm") & ".xml")
+            dt = Nothing
+
+
+            'MATRIX COEFFICIENTS
+            '===================
+            sql = "SELECT  " & vbNewLine & _
+                  "   0 AS ZeroBaseColIndex, " & vbNewLine & _
+                  "   0 AS ZeroBaseRowIndex, " & vbNewLine & _
+                  "   0 AS ZeroBaseLineNumber, " & vbNewLine & _
+                  "   0 AS IsFirstRecordOfCOL, " & vbNewLine & _
+                  "   tsysCOL.ColID, " & vbNewLine & _
+                  "   tsysROW.RowID, " & vbNewLine & _
+                  "   tsysMTX.COL, " & vbNewLine & _
+                  "   tsysMTX.ROW, " & vbNewLine & _
+                  "   tsysMTX.COEF, " & vbNewLine & _
+                  "   tsysCOL.OBJ, " & vbNewLine & _
+                  "   tsysCOL.LO, " & vbNewLine & _
+                  "   tsysCOL.UP, " & vbNewLine & _
+                  "   0.0044 AS dOBJ, " & vbNewLine & _
+                  "   0.0044 AS dLO, " & vbNewLine & _
+                  "   0.0044 AS dUP, " & vbNewLine & _
+                  "   0 AS matBEG, " & vbNewLine & _
+                  "   0 AS matCOUNT, " & vbNewLine & _
+                  "   0 AS matINDEX, " & vbNewLine & _
+                  "   0.0044 AS matVALUE, " & vbNewLine & _
+                  "   0 AS ival " & vbNewLine & _
+                  "FROM " & vbNewLine & _
+                  "   (tsysCOL INNER JOIN tsysMTX ON tsysCOL.ColID = tsysMTX.ColID) " & vbNewLine & _
+                  "                  INNER JOIN tsysROW ON tsysMTX.RowID = tsysROW.RowID " & vbNewLine & _
+                  "ORDER BY tsysCOL.ColID, tsysROW.RowID; "
+            adapter = New OleDb.OleDbDataAdapter(sql, conStr)
+            dt = New DataTable
+            adapter.Fill(dt)
+            _ds.Tables.Add(dt)
+            _ds.Tables(2).TableName = "MATRIX"
+            '--------------------------------------------
+            ''Walk the table line by line and index the columns, rows and coefficients
+            sLastCOL = ""
+            iColCount = 0
+            ival = 0
+            ivalLast = 0
+            iCurRowIndex = 0
+
+            For i = 0 To CLng(dt.Rows.Count - 1)
+                dt.Rows(i).Item("ZeroBaseLineNumber") = i
+
+                'Find and set the ZeroBaseRowIndex
+                For j = 0 To _ds.Tables("ROWSLIST").Rows.Count - 1
+                    If dt.Rows(i).Item("ROW") = _ds.Tables("ROWSLIST").Rows(j).Item("ROW") Then
+                        dt.Rows(i).Item("ZeroBaseRowIndex") = j
+                    End If
+                Next
+
+
+                iSQLCount = iSQLCount + 1
+                sCOL = dt.Rows(i).Item("COL")
+
+                'INIT TO NULLS 
+                dt.Rows(i).Item("dOBJ") = DBNull.Value
+                dt.Rows(i).Item("dLO") = DBNull.Value
+                dt.Rows(i).Item("dUP") = DBNull.Value
+                dt.Rows(i).Item("matBEG") = DBNull.Value
+                dt.Rows(i).Item("matCOUNT") = DBNull.Value
+
+                If sCOL <> sLastCOL Then  'first line of new column aka variable aka vector
+                    iCountCoeffsInCOL = 0
+                    dt.Rows(i).Item("IsFirstRecordOfCOL") = 1
+                    dt.Rows(i).Item("ZeroBaseColIndex") = iColCount
+                    dt.Rows(i).Item("dOBJ") = CDbl(dt.Rows(i).Item("OBJ"))
+                    dt.Rows(i).Item("dLO") = CDbl(dt.Rows(i).Item("LO"))
+                    dt.Rows(i).Item("dUP") = CDbl(dt.Rows(i).Item("UP"))
+                    dt.Rows(i).Item("matBEG") = CLng(dt.Rows(i).Item("ZeroBaseLineNumber"))
+                    If iColCount > 0 Then
+                        ival = dt.Rows(i).Item("ZeroBaseLineNumber")
+                        'dt.Rows(i).Item("matCOUNT") = CLng(ival - ivalLast)  'this is no good -- it puts it in wrong position
+
+                        'the next two lines do it correctly but on the first line of each COL,
+                        'it gets placed in the datatable back for the previous COL
+                        iPositionForMatCount = CLng(dt.Rows(i).Item("ZeroBaseLineNumber")) - CLng(ival - ivalLast)
+                        dt.Rows(iPositionForMatCount).Item("matCOUNT") = CLng(ival - ivalLast)
+                        ivalLast = ival
+                    End If
+                    iColCount = iColCount + 1
+                End If
+                dt.Rows(i).Item("matINDEX") = CLng(dt.Rows(i).Item("ZeroBaseRowIndex"))
+                dt.Rows(i).Item("matVALUE") = CDbl(dt.Rows(i).Item("COEF"))
+                iCountCoeffsInCOL = iCountCoeffsInCOL + 1
+
+                If i = CLng(dt.Rows.Count - 1) Then 'this is the last record in the MATRIX (last NonZero)
+                    'handle if single   coefficient   in the last vector
+                    iPositionForMatCount = CLng(dt.Rows(i).Item("ZeroBaseLineNumber")) - iCountCoeffsInCOL + 1
+                    dt.Rows(iPositionForMatCount).Item("matCOUNT") = iCountCoeffsInCOL
+                End If
+
+                iLoopCount = iLoopCount + 1
+                sLastCOL = sCOL
+            Next
+            '--------------------------------------------
+            dt.WriteXml("C:\TEMP\" & "MATRIX-" & Microsoft.VisualBasic.Format(Now(), "yyyymmdd-hhmm") & ".xml")
+            dt = Nothing
+
+            con.Close()
+            con = Nothing
+            adapter = Nothing
+                    '_ds = Nothing
+            dt = Nothing
+
+            Debug.Print(" TIME:      " & Microsoft.VisualBasic.Format(My.Computer.Clock.TickCount - starttime), "yyyymmdd-hhmm")
+            Debug.Print(" iLOOPS:    " & iLoopCount)
+            Debug.Print(" iSQL:      " & iSQLCount)
+            Debug.Print(" COLUMNS:   " & _ds.Tables(0).Rows.Count)
+            Debug.Print(" ROWSLIST:  " & _ds.Tables(1).Rows.Count)
+            Debug.Print(" MATRIX:    " & _ds.Tables(2).Rows.Count)
+
+        End Sub
+
+        Public Sub GetRowCount()
+        End Sub
+    End Module
+
+End Namespace
